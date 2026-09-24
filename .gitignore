@@ -1,0 +1,11 @@
+# 打包产物
+exports/
+*.zip
+
+# 临时校验脚本
+_check.js
+_v*.js
+
+# 系统文件
+Thumbs.db
+.DS_Store
