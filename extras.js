@@ -353,6 +353,29 @@ window.__GH_EXTRAS__ = {
     'Files changed': '文件更改',
     'Review changes': '审阅更改',
     'Pull request successfully merged and closed': '拉取请求已成功合并并关闭',
+
+    /* ================= 仓库设置 · 代码扫描 · AI Scan（新增工具） ================= */
+    'AI Scan': 'AI 扫描',
+    'AI Scan for pull requests': '用于拉取请求的 AI 扫描',
+    'AI Scan for pull requests (Beta)': '用于拉取请求的 AI 扫描（测试版）',
+    'AI-powered security detections': 'AI 驱动的安全检测',
+    'AI-powered security detections in pull requests': '拉取请求中的 AI 驱动安全检测',
+    'Generate CodeQL findings for non-CodeQL languages using AI.': '使用 AI 为非 CodeQL 语言生成 CodeQL 结果。',
+    'Generate CodeQL findings for non-CodeQL languages using AI': '使用 AI 为非 CodeQL 语言生成 CodeQL 结果',
+    'Generate CodeQL findings for non-CodeQL languages using': '使用 AI 为非 CodeQL 语言生成 CodeQL 结果，通过',
+    'Find security vulnerabilities in pull requests with AI.': '使用 AI 查找拉取请求中的安全漏洞。',
+    'Find security vulnerabilities in pull requests with AI': '使用 AI 查找拉取请求中的安全漏洞',
+    'Learn more about AI Scan': '详细了解 AI 扫描',
+    'Learn more about AI-powered security detections': '详细了解 AI 驱动的安全检测',
+    'Enable AI Scan': '启用 AI 扫描',
+    'Disable AI Scan': '禁用 AI 扫描',
+    'Beta': '测试版',
+    '(Beta)': '（测试版）',
+    '（Beta）': '（测试版）',
+    'AI Scan (Beta)': 'AI 扫描（测试版）',
+    'Public preview': '公开预览',
+    'Learn more about': '详细了解',
+    'about AI Scan': '关于 AI 扫描',
   },
 
   /* =========================== 补充正则规则 =========================== */
@@ -402,6 +425,10 @@ window.__GH_EXTRAS__ = {
 
     /* -------- Copilot 优化目标（处理拆分文本节点或其它取值） -------- */
     [/Optimized for:\s*/g, '优化目标：'],
+
+    /* -------- 代码扫描 · AI Scan（Beta 标记 / 拆分节点兜底） -------- */
+    [/AI Scan for pull requests\s*[\(（]\s*Beta\s*[\)）]/gi, '用于拉取请求的 AI 扫描（测试版）'],
+    [/Generate CodeQL findings for non-CodeQL languages using AI/gi, '使用 AI 为非 CodeQL 语言生成 CodeQL 结果'],
   ],
 
   /* =========================== 拆分文本补丁 =========================== */
@@ -421,6 +448,19 @@ window.__GH_EXTRAS__ = {
     {
       pattern: /^\s*Make sure to copy your new personal access token now[.!]?\s*You won't be able to see it again[.!]?\s*$/i,
       replacement: '请务必立即复制您的新个人访问令牌。之后您将无法再次查看它！',
+    },
+    // 代码扫描 · AI Scan（Beta 标记常与标题拆成两个节点）
+    {
+      pattern: /^\s*AI Scan for pull requests\s*[\(（]\s*Beta\s*[\)）]\s*$/i,
+      replacement: '用于拉取请求的 AI 扫描（测试版）',
+    },
+    {
+      pattern: /^\s*AI Scan for pull requests\s*$/i,
+      replacement: '用于拉取请求的 AI 扫描',
+    },
+    {
+      pattern: /^\s*Generate CodeQL findings for non-CodeQL languages using AI\.?\s*$/i,
+      replacement: '使用 AI 为非 CodeQL 语言生成 CodeQL 结果。',
     },
   ],
 
