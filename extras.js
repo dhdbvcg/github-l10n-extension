@@ -376,6 +376,27 @@ window.__GH_EXTRAS__ = {
     'Public preview': '公开预览',
     'Learn more about': '详细了解',
     'about AI Scan': '关于 AI 扫描',
+
+    /* -------- 发行版说明常见标题（避免机翻出"加入物/固定"之类） -------- */
+    'Added': '新增',
+    'Fixed': '修复',
+    'Changed': '变更',
+    'Removed': '移除',
+    'Deprecated': '已弃用',
+    'Security': '安全',
+    'Notes': '说明',
+    'Changelog': '更新日志',
+    "What's Changed": '变更内容',
+    "What's New": '更新内容',
+    'New Features': '新特性',
+    'New features': '新特性',
+    'Bug Fixes': '错误修复',
+    'Bug fixes': '错误修复',
+    'Improvements': '改进',
+    'Breaking changes': '破坏性变更',
+    'Breaking Changes': '破坏性变更',
+    'Performance': '性能',
+    'Documentation': '文档',
   },
 
   /* =========================== 补充正则规则 =========================== */

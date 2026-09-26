@@ -54,6 +54,26 @@
     });
   }
 
+  const MT_ERROR_RE = /QUERY LENGTH LIMIT|MYMEMORY WARNING|INVALID (SOURCE|TARGET|LANGUAGE)|PLEASE (SELECT|USE) TWO DISTINCT|QUOTA|^HTTP \d+$|FAILED TO FETCH/i;
+
+  /* 离线词典兜底：locals/extras/dictionary 的合并静态表（短标题优先走这里） */
+  let offlineDict = null;
+  function getOfflineDict() {
+    if (offlineDict) return offlineDict;
+    const merged = {};
+    try {
+      if (window.__GH_L10N_DICT__) Object.assign(merged, window.__GH_L10N_DICT__);
+      if (window.__GH_EXTRAS__ && window.__GH_EXTRAS__.static) Object.assign(merged, window.__GH_EXTRAS__.static);
+      const i18n = window.I18N;
+      if (i18n && i18n['zh-CN'] && i18n['zh-CN'].public && i18n['zh-CN'].public.static) {
+        // locals 优先级最高，放最后覆盖
+        Object.assign(merged, i18n['zh-CN'].public.static);
+      }
+    } catch (e) { /* noop */ }
+    offlineDict = merged;
+    return merged;
+  }
+
   async function mt(text) {
     const key = hash(text);
     if (cache.has(key)) {
@@ -63,6 +83,12 @@
     }
     const res = await send({ type: 'ghl10n-mt', text });
     if (res && res.ok && res.text) {
+      // 双保险：引擎错误文案绝不作为译文展示
+      if (MT_ERROR_RE.test(res.text)) {
+        cache.set(key, '');
+        persistCache();
+        throw new Error('engine-error');
+      }
       cache.set(key, res.text);
       persistCache();
       return res.text;
@@ -244,6 +270,18 @@
         ? [...document.querySelectorAll(README_SEL)]
         : [...document.querySelectorAll('.markdown-body')].filter((r) => !r.closest('#readme'));
       for (const root of roots) {
+        // 短标题（≤3 词）优先走离线词典：即使机翻引擎全挂也能出"新增/修复"
+        const headings = [...root.querySelectorAll('h1,h2,h3,h4')];
+        for (const h of headings) {
+          if (h.dataset.ghl10nDone) continue;
+          const text = h.textContent.trim();
+          if (text && text.split(/\s+/).length <= 3) {
+            const out = makeOut('block');
+            h.insertAdjacentElement('afterend', out);
+            h.dataset.ghl10nDone = '1';
+            jobs.push({ out, text, dictFirst: true });
+          }
+        }
         for (const el of leafBlocks(root)) {
           if (el.dataset.ghl10nDone) continue;
           const out = makeOut('block');
@@ -304,10 +342,13 @@
     const total = jobs.length;
     let done = 0;
     const outs = [];
+    const dict = getOfflineDict();
     btn.textContent = '译 0/' + total;
     await pool(jobs, 4, async (job) => {
       try {
-        const t = await mt(job.text);
+        // 短标题等 dictFirst 任务：离线词典能翻就直接用，不请求引擎
+        const dictHit = job.dictFirst && dict[job.text];
+        const t = typeof dictHit === 'string' && dictHit ? dictHit : await mt(job.text);
         job.out.querySelector('.gh-l10n-mt-txt').textContent = t;
       } catch (e) {
         job.out.remove();
