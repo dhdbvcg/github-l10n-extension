@@ -22,7 +22,15 @@
   function loadCache() {
     if (!(typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local)) return;
     chrome.storage.local.get({ mtCache: {} }, (r) => {
-      for (const [k, v] of Object.entries(r.mtCache || {})) cache.set(k, v);
+      let dirty = false;
+      for (const [k, v] of Object.entries(r.mtCache || {})) {
+        // 清洗 v1.1.0 时代被持久化的引擎报错"译文"
+        if (v && MT_ERROR_RE.test(v)) { dirty = true; continue; }
+        cache.set(k, v);
+      }
+      if (dirty) {
+        try { chrome.storage.local.set({ mtCache: Object.fromEntries(cache) }); } catch (e) { /* noop */ }
+      }
     });
   }
 
@@ -33,6 +41,7 @@
       const obj = {};
       let n = 0;
       for (const [k, v] of cache) {
+        if (!v || MT_ERROR_RE.test(v)) continue; // 不持久化空值/报错文案
         obj[k] = v;
         if (++n >= 800) break;
       }
@@ -78,23 +87,22 @@
     const key = hash(text);
     if (cache.has(key)) {
       const v = cache.get(key);
-      if (v) return v;
-      throw new Error('cached-fail');
+      // 缓存命中也要过滤：报错文案绝不能当译文（修复 v1.1.0 污染缓存）
+      if (v && !MT_ERROR_RE.test(v)) return v;
+      if (v) { cache.delete(key); } // 命中污染条目：清除后走重新翻译
+      else throw new Error('cached-fail');
     }
     const res = await send({ type: 'ghl10n-mt', text });
     if (res && res.ok && res.text) {
       // 双保险：引擎错误文案绝不作为译文展示
       if (MT_ERROR_RE.test(res.text)) {
-        cache.set(key, '');
-        persistCache();
         throw new Error('engine-error');
       }
       cache.set(key, res.text);
       persistCache();
       return res.text;
     }
-    cache.set(key, '');
-    persistCache();
+    // 失败不写负缓存：下次点击可重试（v1.1.1 之前失败被永久记住导致一直无译文）
     throw new Error((res && res.error) || '翻译失败');
   }
 
