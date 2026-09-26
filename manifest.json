@@ -1,9 +1,16 @@
 {
   "manifest_version": 3,
   "name": "GitHub 中文化",
-  "description": "将 GitHub 网页界面翻译为中文，提升中文用户体验。",
-  "version": "1.0.0",
+  "description": "GitHub 界面汉化（离线词条）+ 人机翻译（关于/自述/许可证/发行版等长文对照）。支持 Copilot/AI 界面与企业版流程。",
+  "version": "1.1.0",
   "permissions": ["storage"],
+  "host_permissions": [
+    "https://translate.googleapis.com/*",
+    "https://api.mymemory.translated.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -23,7 +30,7 @@
         "https://education.github.com/*",
         "https://www.githubstatus.com/*"
       ],
-      "js": ["locals.js", "extras.js", "dictionary.js", "content.js"],
+      "js": ["locals.js", "extras.js", "dictionary.js", "content.js", "mt.js"],
       "css": [],
       "run_at": "document_idle"
     }
