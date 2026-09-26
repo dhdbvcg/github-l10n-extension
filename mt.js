@@ -51,15 +51,21 @@
 
   function send(msg) {
     return new Promise((resolve, reject) => {
-      try {
-        chrome.runtime.sendMessage(msg, (r) => {
-          const err = chrome.runtime.lastError;
-          if (err) reject(new Error(err.message));
-          else resolve(r);
-        });
-      } catch (e) {
-        reject(e);
-      }
+      const attempt = (n) => {
+        try {
+          chrome.runtime.sendMessage(msg, (r) => {
+            const err = chrome.runtime.lastError;
+            // Service Worker 休眠后首次唤醒可能失败：短延迟重试一次
+            if (err && n < 1) { setTimeout(() => attempt(n + 1), 300); return; }
+            if (err) reject(new Error(err.message));
+            else resolve(r);
+          });
+        } catch (e) {
+          if (n < 1) { setTimeout(() => attempt(n + 1), 300); return; }
+          reject(e);
+        }
+      };
+      attempt(0);
     });
   }
 
@@ -127,6 +133,9 @@
     .gh-l10n-mt-src{white-space:pre-wrap;word-break:break-word;max-height:9em;overflow:auto;
       color:var(--ghl10n-fg,#57606a);font-size:.85em;opacity:.75}
     .gh-l10n-mt-dst{margin-top:4px;white-space:pre-wrap;word-break:break-word}
+    .gh-l10n-mt-retry{border-color:var(--ghl10n-warn,#bf8700);color:var(--ghl10n-warn,#bf8700)}
+    .gh-l10n-mt-float + .gh-l10n-mt-retry{position:fixed;right:20px;bottom:72px;z-index:999}
+    .gh-l10n-mt-fail{opacity:.7;font-style:italic}
     .gh-l10n-mt-hide{display:none!important}
     @media (prefers-color-scheme: dark){
       :root{--ghl10n-border:#30363d;--ghl10n-bg:#161b22;--ghl10n-bg-hover:#21262d;
@@ -265,13 +274,16 @@
 
   function collectJobs(area) {
     const jobs = [];
+    // 无拉丁字母的段落（纯中文/纯符号/纯数字）不送翻译，避免白占并发
+    const needMT = (t) => !!t && /[a-zA-Z]/.test(t);
+
     if (area === 'about') {
       const about = document.querySelector(ABOUT_SEL);
       if (about && !about.dataset.ghl10nDone) {
         const out = makeOut('block');
         about.insertAdjacentElement('afterend', out);
         about.dataset.ghl10nDone = '1';
-        jobs.push({ out, text: about.textContent.trim() });
+        jobs.push({ el: about, out, text: about.textContent.trim() });
       }
     } else if (area === 'readme' || area === 'release') {
       const roots = area === 'readme'
@@ -287,15 +299,17 @@
             const out = makeOut('block');
             h.insertAdjacentElement('afterend', out);
             h.dataset.ghl10nDone = '1';
-            jobs.push({ out, text, dictFirst: true });
+            jobs.push({ el: h, out, text, dictFirst: true });
           }
         }
         for (const el of leafBlocks(root)) {
           if (el.dataset.ghl10nDone) continue;
+          const text = el.textContent.trim();
+          if (!needMT(text)) { el.dataset.ghl10nDone = '1'; continue; }
           const out = makeOut('block');
           el.insertAdjacentElement('afterend', out);
           el.dataset.ghl10nDone = '1';
-          jobs.push({ out, text: el.textContent.trim() });
+          jobs.push({ el, out, text });
         }
       }
     } else if (area === 'filelist') {
@@ -303,19 +317,22 @@
         if (jobs.length >= 40) break;
         if (el.dataset.ghl10nDone) continue;
         const text = el.textContent.trim();
-        if (!text || text === '…' || text === '...') continue;
+        if (!needMT(text) || text === '…' || text === '...') continue;
         const out = makeOut('inline');
         el.insertAdjacentElement('afterend', out);
         el.dataset.ghl10nDone = '1';
-        jobs.push({ out, text });
+        jobs.push({ el, out, text });
       }
     } else if (area === 'blob') {
       const text = blobText().trim();
       if (!text) return jobs;
-      const panel = makePanel();
       const blob = document.querySelector(BLOB_SEL);
-      (blob && blob.parentElement ? blob.parentElement : document.body).appendChild(panel);
-      const chunks = text.split(/\n{2,}/).map((c) => c.trim()).filter(Boolean).slice(0, 60);
+      const host = blob && blob.parentElement ? blob.parentElement : document.body;
+      // 重复点击/重试时先清掉旧面板，避免多份对照面板叠加
+      [...host.children].forEach((c) => { if (c.classList && c.classList.contains('gh-l10n-mt-panel')) c.remove(); });
+      const panel = makePanel();
+      host.appendChild(panel);
+      const chunks = text.split(/\n{2,}/).map((c) => c.trim()).filter(needMT).slice(0, 60);
       for (const chunk of chunks) {
         const pair = document.createElement('div');
         pair.className = 'gh-l10n-mt-pair';
@@ -349,38 +366,94 @@
   async function runJobs(btn, jobs) {
     const total = jobs.length;
     let done = 0;
-    const outs = [];
+    let failed = 0;
+    let lastError = '';
+    // 累积已有译文（重试失败段时不清空先前成功的部分）
+    const outs = Array.isArray(btn._outs) ? btn._outs.slice() : [];
     const dict = getOfflineDict();
+    // 同一批里内容完全相同的段落共享一次翻译请求（发行版说明常见重复句式）
+    const shared = new Map();
+    const translateShared = (text) => {
+      if (!shared.has(text)) shared.set(text, mt(text));
+      return shared.get(text);
+    };
     btn.textContent = '译 0/' + total;
-    await pool(jobs, 4, async (job) => {
+    await pool(jobs, 2, async (job) => {
       try {
         // 短标题等 dictFirst 任务：离线词典能翻就直接用，不请求引擎
         const dictHit = job.dictFirst && dict[job.text];
-        const t = typeof dictHit === 'string' && dictHit ? dictHit : await mt(job.text);
+        const t = typeof dictHit === 'string' && dictHit ? dictHit : await translateShared(job.text);
         job.out.querySelector('.gh-l10n-mt-txt').textContent = t;
+        outs.push(job.out);
       } catch (e) {
-        job.out.remove();
+        failed++;
+        lastError = String((e && e.message) || e);
+        // blob 对照面板：保留原文，只把译文位置标记失败（整对删掉会让原文一起消失）
+        const srcEl = job.out.querySelector && job.out.querySelector('.gh-l10n-mt-src');
+        const dstEl = job.out.querySelector && job.out.querySelector('.gh-l10n-mt-txt');
+        if (srcEl && dstEl) {
+          dstEl.textContent = '（翻译失败）';
+          dstEl.classList.add('gh-l10n-mt-fail');
+        } else {
+          job.out.remove();
+        }
+        // 失败不锁死：清掉完成标记，下次点击可重试该段
+        if (job.el) delete job.el.dataset.ghl10nDone;
       } finally {
         done++;
-        if (job.out.isConnected) outs.push(job.out);
         btn.textContent = '译 ' + done + '/' + total;
       }
     });
     btn._outs = outs;
+
     if (outs.length) {
       btn.textContent = '收起翻译';
       btn.dataset.state = 'done';
+      btn.dataset.collapsed = '0';
+      if (failed) {
+        btn.title = '有 ' + failed + ' 段失败：' + lastError;
+        showRetry(btn, failed);
+      } else {
+        btn.title = AREA_TITLE[btn.dataset.area] || '人机翻译（机器翻译，仅供参考）';
+        hideRetry(btn);
+      }
     } else {
-      btn.textContent = '无内容';
-      setTimeout(() => { btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '译 提交信息' : '译'; }, 1500);
+      // 全部失败：按钮回到可重试状态，并把原因挂到 title 上
+      btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '译 提交信息' : '译';
+      btn.title = '翻译失败：' + (lastError || '未知原因') + '（可再次点击重试）';
     }
+  }
+
+  /* 失败提示：在被点按钮后挂一个「重试失败」小按钮，只补翻未完成段落 */
+  function showRetry(btn, failed) {
+    let retry = btn.nextElementSibling;
+    if (!retry || !retry.classList || !retry.classList.contains('gh-l10n-mt-retry')) {
+      retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'gh-l10n-mt-btn gh-l10n-mt-retry';
+      retry.title = '只重新翻译失败的段落';
+      btn.insertAdjacentElement('afterend', retry);
+    }
+    retry.textContent = '重试失败 (' + failed + ')';
+    retry._owner = btn;
+  }
+
+  function hideRetry(btn) {
+    const n = btn.nextElementSibling;
+    if (n && n.classList && n.classList.contains('gh-l10n-mt-retry')) n.remove();
   }
 
   async function handle(btn) {
     const area = btn.dataset.area;
     if (btn.dataset.state === 'done') {
-      const hiding = btn.textContent === '收起翻译';
+      // 用状态位判断，而不是按钮文案（文案会随失败计数变化）
+      const hiding = btn.dataset.collapsed !== '1';
       (btn._outs || []).forEach((o) => o.classList.toggle('gh-l10n-mt-hide', hiding));
+      const retry = btn.nextElementSibling;
+      if (retry && retry.classList && retry.classList.contains('gh-l10n-mt-retry')) {
+        retry.classList.toggle('gh-l10n-mt-hide', hiding);
+      }
+      btn.dataset.collapsed = hiding ? '1' : '0';
       btn.textContent = hiding ? '显示翻译' : '收起翻译';
       return;
     }
@@ -400,6 +473,16 @@
 
   /* =========================== 事件与调度 =========================== */
   document.addEventListener('click', (ev) => {
+    const retry = ev.target.closest('.gh-l10n-mt-retry');
+    if (retry && retry._owner) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      // 只补翻失败段落：成功段已带 ghl10nDone 标记，collectJobs 会自动跳过
+      retry._owner.dataset.state = '';
+      retry.remove();
+      handle(retry._owner);
+      return;
+    }
     const btn = ev.target.closest('.gh-l10n-mt-btn');
     if (!btn) return;
     ev.preventDefault();
@@ -418,7 +501,7 @@
   }
 
   function removeAll() {
-    document.querySelectorAll('.gh-l10n-mt-btn, .gh-l10n-mt-out, .gh-l10n-mt-panel')
+    document.querySelectorAll('.gh-l10n-mt-btn, .gh-l10n-mt-out, .gh-l10n-mt-panel, .gh-l10n-mt-bar, .gh-l10n-mt-retry')
       .forEach((e) => e.remove());
     document.querySelectorAll('[data-ghl10n-done]').forEach((e) => { delete e.dataset.ghl10nDone; });
   }

@@ -1057,8 +1057,9 @@
 
   function transText(text) {
     if (!text) return false;
+    // 纯空白/数字、纯中文（含全角标点与 CJK 标点）、不含拉丁字母的文本一律跳过
     if (/^[\s0-9]*$/.test(text) ||
-      /^[一-龥]+$/.test(text) ||
+      /^[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff01-\uff5e\u2000-\u206f]+$/.test(text) ||
       !/[a-zA-Z,.]/.test(text)) {
       return false;
     }
@@ -1068,6 +1069,9 @@
 
     const cached = transTextCache.get(cleanedText);
     if (cached !== undefined) {
+      // LRU：命中后移到末尾，保证淘汰时丢的是最久未用的条目
+      transTextCache.delete(cleanedText);
+      transTextCache.set(cleanedText, cached);
       return cached === null ? false : text.replace(trimmedText, () => cached);
     }
 
@@ -1075,8 +1079,9 @@
     const finalResult = (result && result !== cleanedText) ? result : false;
 
     transTextCache.set(cleanedText, finalResult === false ? null : finalResult);
+    // LRU 淘汰：超限时丢弃最久未使用的最旧四分之一（命中会移到末尾）
     if (transTextCache.size > TRANS_TEXT_CACHE_MAX) {
-      let drop = Math.floor(TRANS_TEXT_CACHE_MAX / 2);
+      let drop = Math.floor(TRANS_TEXT_CACHE_MAX / 4);
       for (const key of transTextCache.keys()) {
         transTextCache.delete(key);
         if (--drop <= 0) break;
