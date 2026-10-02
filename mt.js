@@ -122,8 +122,10 @@
       box-shadow:0 4px 12px rgba(140,149,159,.25)}
     .gh-l10n-mt-out{margin:4px 0 8px;padding:4px 10px;border-left:3px solid var(--ghl10n-border,#d0d7de);
       color:var(--ghl10n-fg,#57606a);font-size:.92em;background:var(--ghl10n-bg,#f6f8fa);border-radius:0 6px 6px 0}
-    .gh-l10n-mt-out.gh-l10n-mt-inline{display:inline-block;margin:0 0 0 8px;padding:0 8px;border:none;
-      font-size:.85em;background:var(--ghl10n-bg,#f6f8fa);border-radius:6px}
+    /* 覆盖式：译文就地位于原段落，悬停显示"可切回原文" */
+    [data-ghl10n-mode="replaced"]{cursor:help}
+    [data-ghl10n-mode="replaced"]:hover{background:var(--ghl10n-bg,#f6f8fa);
+      box-shadow:0 0 0 3px var(--ghl10n-bg,#f6f8fa);border-radius:4px}
     .gh-l10n-mt-tag{opacity:.6;margin-right:6px;font-size:.85em}
     .gh-l10n-mt-panel{border:1px solid var(--ghl10n-border,#d0d7de);border-radius:6px;margin:8px 0;overflow:hidden}
     .gh-l10n-mt-panel-head{padding:6px 10px;font-size:12px;color:var(--ghl10n-fg,#57606a);
@@ -242,14 +244,46 @@
     );
   }
 
+  /* =========================== 覆盖式翻译核心 ===========================
+   * 译文直接替换原元素文本，原文暂存于 el.__orig 以便随时还原。
+   * mode: 'replace' 直接改 textContent；'panel' 用于 blob 双栏对照（原文不可安全改写）
+   */
+  const ORIG_KEY = '__ghL10nOrig';
+  const TGT_KEY = '__ghL10nTgt';
+  const DONE_KEY = 'ghl10nDone';
+
+  function snapshotOrig(el) {
+    if (el[ORIG_KEY] == null) el[ORIG_KEY] = el.innerHTML;
+    return el[ORIG_KEY];
+  }
+
+  function applyReplacement(el, text) {
+    el[TGT_KEY] = text;
+    el.textContent = text;      // 覆盖：只保留译文
+    el.dataset.ghl10nMode = 'replaced';
+  }
+
+  function restoreOriginal(el) {
+    const orig = el[ORIG_KEY];
+    if (orig == null) return;
+    el.innerHTML = orig;        // 还原：恢复原文 DOM
+    el.dataset.ghl10nMode = 'orig';
+  }
+
+  function toggleOriginal(el) {
+    if (el.dataset.ghl10nMode === 'replaced') restoreOriginal(el);
+    else applyReplacement(el, el[TGT_KEY]);
+  }
+
   function makeOut(mode) {
-    const d = document.createElement(mode === 'inline' ? 'span' : 'div');
-    d.className = 'gh-l10n-mt-out' + (mode === 'inline' ? ' gh-l10n-mt-inline' : '');
+    // 覆盖式模式下不再生成插入节点；此函数仅用于 blob 对照面板
+    const d = document.createElement('div');
+    d.className = 'gh-l10n-mt-out';
     const tag = document.createElement('span');
     tag.className = 'gh-l10n-mt-tag';
     tag.textContent = '机翻';
     d.appendChild(tag);
-    const t = document.createElement(mode === 'inline' ? 'span' : 'div');
+    const t = document.createElement('div');
     t.className = 'gh-l10n-mt-txt';
     d.appendChild(t);
     return d;
@@ -279,49 +313,48 @@
 
     if (area === 'about') {
       const about = document.querySelector(ABOUT_SEL);
-      if (about && !about.dataset.ghl10nDone) {
-        const out = makeOut('block');
-        about.insertAdjacentElement('afterend', out);
-        about.dataset.ghl10nDone = '1';
-        jobs.push({ el: about, out, text: about.textContent.trim() });
+      if (about && !about.dataset[DONE_KEY]) {
+        snapshotOrig(about);
+        about.dataset[DONE_KEY] = '1';
+        about.dataset.ghl10nMode = 'orig';
+        jobs.push({ el: about, text: about.textContent.trim() });
       }
     } else if (area === 'readme' || area === 'release') {
       const roots = area === 'readme'
         ? [...document.querySelectorAll(README_SEL)]
         : [...document.querySelectorAll('.markdown-body')].filter((r) => !r.closest('#readme'));
       for (const root of roots) {
-        // 短标题（≤3 词）优先走离线词典：即使机翻引擎全挂也能出"新增/修复"
-        const headings = [...root.querySelectorAll('h1,h2,h3,h4')];
-        for (const h of headings) {
-          if (h.dataset.ghl10nDone) continue;
+        // 短标题（≤3 词）优先走离线词典：即使翻译服务不可用也能出"新增/修复"
+        for (const h of root.querySelectorAll('h1,h2,h3,h4')) {
+          if (h.dataset[DONE_KEY]) continue;
           const text = h.textContent.trim();
           if (text && text.split(/\s+/).length <= 3) {
-            const out = makeOut('block');
-            h.insertAdjacentElement('afterend', out);
-            h.dataset.ghl10nDone = '1';
-            jobs.push({ el: h, out, text, dictFirst: true });
+            snapshotOrig(h);
+            h.dataset[DONE_KEY] = '1';
+            h.dataset.ghl10nMode = 'orig';
+            jobs.push({ el: h, text, dictFirst: true });
           }
         }
         for (const el of leafBlocks(root)) {
-          if (el.dataset.ghl10nDone) continue;
+          if (el.dataset[DONE_KEY]) continue;
           const text = el.textContent.trim();
-          if (!needMT(text)) { el.dataset.ghl10nDone = '1'; continue; }
-          const out = makeOut('block');
-          el.insertAdjacentElement('afterend', out);
-          el.dataset.ghl10nDone = '1';
-          jobs.push({ el, out, text });
+          if (!needMT(text)) { el.dataset[DONE_KEY] = '1'; continue; }
+          snapshotOrig(el);
+          el.dataset[DONE_KEY] = '1';
+          el.dataset.ghl10nMode = 'orig';
+          jobs.push({ el, text });
         }
       }
     } else if (area === 'filelist') {
       for (const el of document.querySelectorAll(FILELIST_SEL)) {
         if (jobs.length >= 40) break;
-        if (el.dataset.ghl10nDone) continue;
+        if (el.dataset[DONE_KEY]) continue;
         const text = el.textContent.trim();
         if (!needMT(text) || text === '…' || text === '...') continue;
-        const out = makeOut('inline');
-        el.insertAdjacentElement('afterend', out);
-        el.dataset.ghl10nDone = '1';
-        jobs.push({ el, out, text });
+        snapshotOrig(el);
+        el.dataset[DONE_KEY] = '1';
+        el.dataset.ghl10nMode = 'orig';
+        jobs.push({ el, text });
       }
     } else if (area === 'blob') {
       const text = blobText().trim();
@@ -345,8 +378,9 @@
         pair.appendChild(src);
         pair.appendChild(dst);
         panel.appendChild(pair);
-        jobs.push({ out: pair, text: chunk });
+        jobs.push({ el: null, out: pair, panel: true, text: chunk });
       }
+      return jobs;
     }
     return jobs;
   }
@@ -368,8 +402,8 @@
     let done = 0;
     let failed = 0;
     let lastError = '';
-    // 累积已有译文（重试失败段时不清空先前成功的部分）
-    const outs = Array.isArray(btn._outs) ? btn._outs.slice() : [];
+    // 累积已处理的元素（重试失败段时不清空先前成功的部分）
+    const els = Array.isArray(btn._els) ? btn._els.slice() : [];
     const dict = getOfflineDict();
     // 同一批里内容完全相同的段落共享一次翻译请求（发行版说明常见重复句式）
     const shared = new Map();
@@ -380,34 +414,38 @@
     btn.textContent = '译 0/' + total;
     await pool(jobs, 2, async (job) => {
       try {
-        // 短标题等 dictFirst 任务：离线词典能翻就直接用，不请求引擎
+        // 短标题等 dictFirst 任务：离线词典能翻就直接用，不请求翻译服务
         const dictHit = job.dictFirst && dict[job.text];
         const t = typeof dictHit === 'string' && dictHit ? dictHit : await translateShared(job.text);
-        job.out.querySelector('.gh-l10n-mt-txt').textContent = t;
-        outs.push(job.out);
+        if (job.panel) {
+          // blob 对照面板：只填译文位，原文由面板自身展示
+          job.out.querySelector('.gh-l10n-mt-txt').textContent = t;
+        } else {
+          applyReplacement(job.el, t);   // 覆盖：原位替换为译文
+        }
+        els.push(job.el || job.out);
       } catch (e) {
         failed++;
         lastError = String((e && e.message) || e);
-        // blob 对照面板：保留原文，只把译文位置标记失败（整对删掉会让原文一起消失）
-        const srcEl = job.out.querySelector && job.out.querySelector('.gh-l10n-mt-src');
-        const dstEl = job.out.querySelector && job.out.querySelector('.gh-l10n-mt-txt');
-        if (srcEl && dstEl) {
-          dstEl.textContent = '（翻译失败）';
-          dstEl.classList.add('gh-l10n-mt-fail');
-        } else {
-          job.out.remove();
+        if (job.panel) {
+          const dstEl = job.out.querySelector && job.out.querySelector('.gh-l10n-mt-txt');
+          if (dstEl) {
+            dstEl.textContent = '（翻译失败）';
+            dstEl.classList.add('gh-l10n-mt-fail');
+          }
+        } else if (job.el) {
+          // 失败不锁死：清掉完成标记，原文保持可见，下次点击可重试该段
+          delete job.el.dataset[DONE_KEY];
         }
-        // 失败不锁死：清掉完成标记，下次点击可重试该段
-        if (job.el) delete job.el.dataset.ghl10nDone;
       } finally {
         done++;
         btn.textContent = '译 ' + done + '/' + total;
       }
     });
-    btn._outs = outs;
+    btn._els = els;
 
-    if (outs.length) {
-      btn.textContent = '收起翻译';
+    if (els.length) {
+      btn.textContent = '显示原文';
       btn.dataset.state = 'done';
       btn.dataset.collapsed = '0';
       if (failed) {
@@ -446,15 +484,21 @@
   async function handle(btn) {
     const area = btn.dataset.area;
     if (btn.dataset.state === 'done') {
-      // 用状态位判断，而不是按钮文案（文案会随失败计数变化）
-      const hiding = btn.dataset.collapsed !== '1';
-      (btn._outs || []).forEach((o) => o.classList.toggle('gh-l10n-mt-hide', hiding));
+      // 覆盖式：切换"显示原文 / 显示译文"，不重新请求翻译
+      const toOriginal = btn.dataset.collapsed !== '1';
+      (btn._els || []).forEach((el) => {
+        if (el && el.dataset && el.dataset.ghl10nMode) {
+          toggleOriginal(el);          // 覆盖式元素：原位切换
+        } else if (el) {
+          el.classList.toggle('gh-l10n-mt-hide', toOriginal);  // blob 面板：整体显隐
+        }
+      });
       const retry = btn.nextElementSibling;
       if (retry && retry.classList && retry.classList.contains('gh-l10n-mt-retry')) {
-        retry.classList.toggle('gh-l10n-mt-hide', hiding);
+        retry.classList.toggle('gh-l10n-mt-hide', toOriginal);
       }
-      btn.dataset.collapsed = hiding ? '1' : '0';
-      btn.textContent = hiding ? '显示翻译' : '收起翻译';
+      btn.dataset.collapsed = toOriginal ? '1' : '0';
+      btn.textContent = toOriginal ? '显示译文' : '显示原文';
       return;
     }
     btn.disabled = true;
@@ -501,12 +545,17 @@
   }
 
   function removeAll() {
+    // 覆盖式：译文已写入原元素，先把原文还原回去
+    document.querySelectorAll('[data-ghl10n-mode]').forEach((el) => {
+      if (el[ORIG_KEY] != null) restoreOriginal(el);
+      delete el.dataset.ghl10nMode;
+    });
+    document.querySelectorAll('[data-ghl10n-done]').forEach((e) => { delete e.dataset[DONE_KEY]; });
     document.querySelectorAll('.gh-l10n-mt-btn, .gh-l10n-mt-out, .gh-l10n-mt-panel, .gh-l10n-mt-bar, .gh-l10n-mt-retry')
       .forEach((e) => e.remove());
-    document.querySelectorAll('[data-ghl10n-done]').forEach((e) => { delete e.dataset.ghl10nDone; });
   }
 
-  const OUR_CLASS = /gh-l10n-mt-(btn|out|panel)/;
+  const OUR_CLASS = /gh-l10n-mt-(btn|out|panel|bar|retry)/;
   const mo = new MutationObserver((muts) => {
     for (const m of muts) {
       for (const n of m.addedNodes) {
