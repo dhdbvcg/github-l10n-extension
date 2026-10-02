@@ -5,7 +5,7 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 280px;
+      width: 300px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       padding: 16px;
       background: #f6f8fa;
@@ -30,7 +30,6 @@
       margin-bottom: 8px;
     }
     .row label { font-size: 13px; cursor: pointer; user-select: none; }
-    /* toggle switch */
     .switch {
       position: relative; width: 40px; height: 22px; flex-shrink: 0;
     }
@@ -46,6 +45,48 @@
     }
     .switch input:checked + .slider { background: #2da44e; }
     .switch input:checked + .slider::before { transform: translateX(18px); }
+
+    /* 引擎列表 */
+    .engine-title {
+      font-size: 12px; font-weight: 600; color: #57606a;
+      margin: 12px 0 6px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .engine-title button {
+      font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 6px;
+      background: #f6f8fa; color: #57606a; cursor: pointer; font-weight: 400; margin-left: 4px;
+    }
+    .engine-title button:hover { background: #eaeef2; }
+    .engine-list {
+      background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden;
+    }
+    .engine-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; font-size: 12px; border-bottom: 1px solid #eaeef2;
+    }
+    .engine-item:last-child { border-bottom: none; }
+    .engine-item .idx {
+      width: 16px; text-align: center; color: #8b949e; font-size: 11px; flex-shrink: 0;
+    }
+    .engine-item .name { flex: 1; }
+    .engine-item .state { font-size: 10px; padding: 1px 6px; border-radius: 10px; flex-shrink: 0; }
+    .state-ok { background: #dafbe1; color: #1a7f37; }
+    .state-cool { background: #fff8c5; color: #9a6700; }
+    .state-dead { background: #ffebe9; color: #cf222e; }
+    .engine-item .moves { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
+    .engine-item .moves button {
+      width: 18px; height: 13px; line-height: 11px; font-size: 9px; padding: 0;
+      border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 3px;
+      cursor: pointer; color: #57606a;
+    }
+    .engine-item .moves button:hover { background: #eaeef2; }
+    .engine-item .moves button:disabled { opacity: .3; cursor: default; }
+    .tip { font-size: 11px; color: #6e7781; margin-top: 6px; line-height: 1.5; }
+
+    .btn {
+      font-size: 12px; padding: 3px 10px; border: 1px solid #d0d7de; border-radius: 6px;
+      background: #f6f8fa; cursor: pointer;
+    }
+    .btn:hover { background: #eaeef2; }
     .footer {
       font-size: 11px; color: #6e7781; text-align: center;
       margin-top: 6px; padding-top: 8px; border-top: 1px solid #d0d7de;
@@ -57,6 +98,7 @@
     <img src="icons/icon48.png" alt="logo">
     <h1>GitHub 中文化</h1>
   </div>
+
   <div class="row">
     <label for="toggle">启用翻译</label>
     <label class="switch">
@@ -78,11 +120,22 @@
       <span class="slider"></span>
     </label>
   </div>
-  <div class="row">
-    <label for="mt-clear" style="color:#cf222e">清除译文缓存</label>
-    <button id="mt-clear" style="font-size:12px;padding:3px 10px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa;cursor:pointer">清除</button>
+
+  <div class="engine-title">
+    <span>翻译引擎优先级</span>
+    <span>
+      <button id="eng-probe" title="重新检测各引擎网络可达性">重测</button>
+      <button id="eng-reset">默认</button>
+    </span>
   </div>
-  <div class="footer" id="mt-clear-tip"></div>
+  <div class="engine-list" id="eng-list"></div>
+  <div class="tip">按顺序尝试，失败自动回退。不可达引擎会自动沉底（30 分钟后再试），右上「重测」可立即重新检测。</div>
+
+  <div class="row" style="margin-top:10px">
+    <label for="mt-clear" style="color:#cf222e">清除译文缓存</label>
+    <button id="mt-clear" class="btn">清除</button>
+  </div>
+  <div class="tip" id="mt-clear-tip" style="min-height:14px"></div>
   <div class="footer">刷新页面后生效 · 词条离线 · 长文点「译」按钮</div>
   <script src="popup.js"></script>
 </body>
