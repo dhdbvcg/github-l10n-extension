@@ -159,22 +159,37 @@
 
   /* =========================== 目标区域 =========================== */
   const ABOUT_SEL = 'p.f4.my-3, [itemprop="about"]';
-  const README_SEL = '#readme article.markdown-body, #readme .markdown-body';
+  // README 正文：GitHub 会在容器为 #readme / #repo-content-pjax-container / article.markdown-body
+  // 等多种结构下渲染（含懒加载展开后的片段），故放宽到「页面上的文章型 markdown 正文」
+  const README_SEL = [
+    '#readme article.markdown-body',
+    '#readme .markdown-body',
+    'article.markdown-body',
+    '#repo-content-pjax-container .markdown-body',
+  ].join(', ');
   const FILELIST_SEL = '[class*="react-directory-commit-message"]';
   const BLOB_SEL = '.react-code-lines, table.highlight, .blob-wrapper';
 
   const AREA_TITLE = {
     all: '一键翻译本页所有可翻译内容',
     about: '人机翻译：关于简介',
-    readme: '人机翻译：自述文件',
+    readme: '人机翻译：自述文件 / 正文内容',
     release: '人机翻译：发行版说明',
     filelist: '人机翻译：文件列表的提交信息',
     blob: '人机翻译：文件内容（许可证 / 贡献指南等）',
+    issue: '人机翻译：议题 / 讨论正文',
+    profile: '人机翻译：个人主页简介',
   };
 
   function isReleasesPage() { return /\/releases(\/|$)/.test(location.pathname); }
   function isBlobPage() { return /\/blob\//.test(location.pathname); }
   function isTreePage() { return /^\/[^/]+\/[^/]+(\/tree\/.*)?$/.test(location.pathname); }
+  // 议题 / 拉取请求 / 讨论页：路径形如 /<owner>/<repo>/issues[/<n>]、/pull/<n>、/discussions/*
+  function isIssuesPage() {
+    const p = location.pathname;
+    return /^\/[^/]+\/[^/]+\/(issues|pull|discussions)(\/|$)/.test(p)
+      || /^\/[^/]+\/[^/]+\/issues\/\d+/.test(p);
+  }
 
   function makeBtn(area) {
     const b = document.createElement('button');
@@ -201,26 +216,31 @@
   function injectButtons() {
     if (!enabled) return;
 
-    // 关于简介（仓库侧栏）
+    // 关于简介（仓库/组织侧栏）
     const about = document.querySelector(ABOUT_SEL);
     if (about && !about.parentElement.querySelector(':scope > .gh-l10n-mt-btn')) {
       about.insertAdjacentElement('afterend', makeBtn('about'));
     }
 
-    // 自述文件（仓库首页 README）
-    const readme = document.querySelector(README_SEL);
-    if (readme && !readme.parentElement.querySelector(':scope > .gh-l10n-mt-bar')) {
-      readme.parentElement.insertBefore(makeBar('readme'), readme);
+    // 个人主页 / 组织简介
+    const bio = document.querySelector('.user-profile-bio, [itemprop="description"], .p-note');
+    if (bio && !bio.parentElement.querySelector(':scope > .gh-l10n-mt-btn')) {
+      bio.insertAdjacentElement('afterend', makeBtn('profile'));
     }
 
-    // 发行版简介（/releases 页）
-    if (isReleasesPage()) {
-      document.querySelectorAll('.markdown-body').forEach((body) => {
-        if (body.closest('#readme')) return;
-        const prev = body.previousElementSibling;
-        if (prev && prev.classList.contains('gh-l10n-mt-bar')) return;
-        body.parentElement.insertBefore(makeBar('release'), body);
-      });
+    /* ---- markdown 正文：仓库首页 README / 发行版 / 议题正文 ----
+     * 同一页面可能有多处正文（README + 若干发行版），按页面类型归到一个 area，
+     * 但每个正文容器上方各挂一个按钮，方便定位。 */
+    const bodies = [...document.querySelectorAll(README_SEL)].filter(uniqueEl);
+    const onReleases = isReleasesPage();
+    const onIssues = isIssuesPage();
+    for (const body of bodies) {
+      // 跳过已被别的按钮条覆盖的容器
+      const prev = body.previousElementSibling;
+      if (prev && prev.classList && prev.classList.contains('gh-l10n-mt-bar')) continue;
+      const area = onReleases ? 'release' : (onIssues ? 'issue' : 'readme');
+      const bar = makeBar(area);
+      body.parentElement.insertBefore(bar, body);
     }
 
     // 文件内容（blob 页：许可证 / 贡献指南 / 安全政策等）
@@ -239,35 +259,35 @@
       document.body.appendChild(float);
     }
 
-    // 全页一键翻译：进入受支持页面时显示，右下角常驻
+    // 全页一键翻译：右下角常驻
     if (autoBtn && !document.querySelector('.gh-l10n-mt-auto')) {
       const wrap = document.createElement('div');
       wrap.className = 'gh-l10n-mt-auto-wrap';
       const b = makeBtn('all');
       b.classList.add('gh-l10n-mt-auto');
       b.textContent = '一键翻译本页';
-      b.title = '自动翻译本页所有可翻译内容（关于 / 自述文件 / 发行版 / 提交信息）';
+      b.title = '自动翻译本页所有可翻译内容';
       wrap.appendChild(b);
       document.body.appendChild(wrap);
     }
   }
 
   /* =========================== 一键翻译全页 =========================== */
-  const AREA_LIST = ['about', 'readme', 'release', 'filelist', 'blob'];
+  const AREA_LIST = ['about', 'profile', 'readme', 'release', 'issue', 'filelist', 'blob'];
 
-  /** 找出当前页面上所有已注入按钮对应的区域（按注入顺序去重） */
+  /**
+   * 本页可翻译的区域（按页面内容检测，不依赖按钮是否已注入）。
+   * 这样 README 懒加载/展开后才出现的正文，一键翻译同样能覆盖。
+   */
   function clickableAreas() {
     const areas = new Set();
-    document.querySelectorAll('.gh-l10n-mt-btn[data-area]').forEach((b) => {
-      if (b.classList.contains('gh-l10n-mt-auto')) return;   // 一键按钮自身
-      if (b.classList.contains('gh-l10n-mt-retry')) return;  // 重试按钮
-      if (b.dataset.state === 'done') return;                // 已翻过，不再重复
-      if (b.classList.contains('gh-l10n-mt-float')) areas.add('filelist');
-      else areas.add(b.dataset.area);
-    });
-    // 悬浮按钮文案固定，用它判断树页
-    const fl = document.querySelector('.gh-l10n-mt-float');
-    if (fl) areas.add('filelist');
+    if (document.querySelector(ABOUT_SEL)) areas.add('about');
+    if (document.querySelector('.user-profile-bio, [itemprop="description"], .p-note')) areas.add('profile');
+    if (document.querySelectorAll(README_SEL).length) {
+      areas.add(isReleasesPage() ? 'release' : (isIssuesPage() ? 'issue' : 'readme'));
+    }
+    if (document.querySelector(FILELIST_SEL)) areas.add('filelist');
+    if (isBlobPage() && document.querySelector(BLOB_SEL)) areas.add('blob');
     return AREA_LIST.filter((a) => areas.has(a));
   }
 
@@ -286,16 +306,22 @@
 
     let totalJobs = 0, doneJobs = 0, failed = 0;
     for (const area of areas) {
+      // 无论该区域是否已有按钮都执行：README 可能懒加载后才出现，按钮还没注入
       const btn = findAreaBtn(area);
-      if (!btn || btn.dataset.state === 'done') continue;
+      if (btn && btn.dataset.state === 'done') continue;   // 整区已翻过
       const jobs = collectJobs(area);
       if (!jobs.length) continue;
       totalJobs += jobs.length;
       // 静默执行：复用翻译内核，不覆盖区域按钮文案（避免与全局进度冲突）
-      const r = await runJobsSilent(btn, jobs, () => {
-        doneJobs += 1;
-        autoBtn.textContent = '翻译中 ' + doneJobs + '/' + totalJobs;
-      });
+      const r = btn
+        ? await runJobsSilent(btn, jobs, () => {
+          doneJobs += 1;
+          autoBtn.textContent = '翻译中 ' + doneJobs + '/' + totalJobs;
+        })
+        : await runJobsOrphan(jobs, () => {
+          doneJobs += 1;
+          autoBtn.textContent = '翻译中 ' + doneJobs + '/' + totalJobs;
+        });
       failed += r.failed;
     }
 
@@ -316,20 +342,20 @@
     const b = document.querySelector('.gh-l10n-mt-auto');
     if (b) {
       b.textContent = '一键翻译本页';
-      b.title = '自动翻译本页所有可翻译内容（关于 / 自述文件 / 发行版 / 提交信息）';
+      b.title = '自动翻译本页所有可翻译内容（简介 / README / 发行版 / 议题 / 提交信息）';
     }
   }
 
-  /** 找到某区域的主按钮（bar 内第一个 btn，或 about 的独立按钮） */
+  /**
+   * 找到某区域的按钮。同一 area 可能有多个按钮（如多个发行版各自一个），
+   * 一键翻译时统一用第一个未完成的按钮作为「归属按钮」承载状态。
+   */
   function findAreaBtn(area) {
     if (area === 'filelist') return document.querySelector('.gh-l10n-mt-float');
-    const bar = document.querySelector('.gh-l10n-mt-bar');
-    if (bar) {
-      const b = bar.querySelector('.gh-l10n-mt-btn[data-area="' + area + '"]');
-      if (b) return b;
-    }
-    // about 按钮是独立插入的，且总在侧栏第一个
-    return document.querySelector('.gh-l10n-mt-btn[data-area="about"]');
+    const list = [...document.querySelectorAll('.gh-l10n-mt-btn[data-area="' + area + '"]')]
+      .filter((b) => !b.classList.contains('gh-l10n-mt-retry'));
+    if (!list.length) return null;
+    return list.find((b) => b.dataset.state !== 'done') || list[0];
   }
 
   /* =========================== 收集待翻译块 =========================== */
@@ -341,6 +367,14 @@
       el.textContent.trim().length > 1 &&
       !el.closest('pre, code')
     );
+  }
+
+  /**
+   * 选择器列表可能匹配到互相嵌套的容器（如 article.markdown-body 与其内部 .markdown-body），
+   * 保留最外层，避免同一段落被重复收集。
+   */
+  function uniqueEl(el, _i, arr) {
+    return !arr.some((other) => other !== el && other.contains && other.contains(el));
   }
 
   /* =========================== 覆盖式翻译核心 ===========================
@@ -418,10 +452,20 @@
         about.dataset.ghl10nMode = 'orig';
         jobs.push({ el: about, text: about.textContent.trim() });
       }
-    } else if (area === 'readme' || area === 'release') {
-      const roots = area === 'readme'
-        ? [...document.querySelectorAll(README_SEL)]
-        : [...document.querySelectorAll('.markdown-body')].filter((r) => !r.closest('#readme'));
+    } else if (area === 'readme' || area === 'release' || area === 'issue') {
+      // readme  ：仓库首页 README（放宽选择器，兼容懒加载/展开结构）
+      // release ：/releases 页各发行版说明
+      // issue   ：议题、拉取请求、讨论、评论正文
+      let roots;
+      if (area === 'readme') {
+        roots = [...document.querySelectorAll(README_SEL)].filter(uniqueEl);
+      } else if (area === 'release') {
+        roots = [...document.querySelectorAll('.markdown-body')].filter(uniqueEl);
+      } else {
+        roots = [...document.querySelectorAll(
+          '.markdown-body, [data-testid="issue-body"], .comment-body, .js-comment-body'
+        )].filter(uniqueEl);
+      }
       for (const root of roots) {
         // 短标题（≤3 词）优先走离线词典：即使翻译服务不可用也能出"新增/修复"
         for (const h of root.querySelectorAll('h1,h2,h3,h4')) {
@@ -443,6 +487,17 @@
           el.dataset.ghl10nMode = 'orig';
           jobs.push({ el, text });
         }
+      }
+    } else if (area === 'profile') {
+      // 个人主页 / 组织简介（bio）
+      for (const bio of document.querySelectorAll('.user-profile-bio, [itemprop="description"], .p-note')) {
+        if (bio.dataset[DONE_KEY]) continue;
+        const text = bio.textContent.trim();
+        if (!needMT(text)) { bio.dataset[DONE_KEY] = '1'; continue; }
+        snapshotOrig(bio);
+        bio.dataset[DONE_KEY] = '1';
+        bio.dataset.ghl10nMode = 'orig';
+        jobs.push({ el: bio, text });
       }
     } else if (area === 'filelist') {
       for (const el of document.querySelectorAll(FILELIST_SEL)) {
@@ -590,6 +645,18 @@
       if (failed) showRetry(btn, failed);
       else hideRetry(btn);
     }
+    return { failed, lastError };
+  }
+
+  /**
+   * 区域按钮尚未注入时的执行路径（如 README 懒加载后才出现的内容）。
+   * 只跑翻译内核；执行完主动触发一次 scanAll，让新出现区域尽快拿到「显示原文」按钮。
+   */
+  async function runJobsOrphan(jobs, onProgress) {
+    const { failed, lastError } = await execJobs(jobs, null, (d, t, f) => {
+      if (onProgress) onProgress(d, t, f);
+    });
+    if (!failed) scanAll();
     return { failed, lastError };
   }
 
