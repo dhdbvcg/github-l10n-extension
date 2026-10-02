@@ -1,11 +1,10 @@
-/* popup.js — 控制开关、引擎优先级与缓存管理，存入 chrome.storage.local */
+/* popup.js — 开关 + OpenNMT 服务配置 + 缓存管理 */
 
-/* =========================== 基础开关 =========================== */
 const toggle     = document.getElementById('toggle');
 const titleCheck = document.getElementById('translate-title');
 const mtToggle   = document.getElementById('mt-toggle');
 const clearBtn   = document.getElementById('mt-clear');
-const tip        = document.getElementById('mt-clear-tip');
+const clearTip   = document.getElementById('mt-clear-tip');
 
 chrome.storage.local.get({ enabled: true, translateTitle: true, mtEnabled: true }, (r) => {
   toggle.checked = r.enabled;
@@ -19,19 +18,21 @@ mtToggle.addEventListener('change', () => chrome.storage.local.set({ mtEnabled: 
 
 clearBtn.addEventListener('click', () => {
   chrome.storage.local.remove('mtCache', () => {
-    tip.textContent = '已清除，刷新 GitHub 页面后重新翻译';
-    setTimeout(() => { tip.textContent = ''; }, 2500);
+    clearTip.textContent = '已清除，刷新 GitHub 页面后重新翻译';
+    setTimeout(() => { clearTip.textContent = ''; }, 2500);
   });
 });
 
-/* =========================== 引擎优先级 =========================== */
-const DEFAULT_ORDER = ['gtx', 'gtx2', 'bing', 'youdao', 'mymemory'];
-const engList = document.getElementById('eng-list');
-let engines = [];      // [{name,label}]
-let order = [];        // 引擎名数组
-let health = {};       // { name: {cooling, lastError} }
+/* =========================== OpenNMT 服务 =========================== */
+const baseInput  = document.getElementById('onnmt-base');
+const modelInput = document.getElementById('onnmt-model');
+const rootInput  = document.getElementById('onnmt-root');
+const badge      = document.getElementById('onnmt-badge');
+const msgEl      = document.getElementById('onnmt-msg');
+const testBtn    = document.getElementById('onnmt-test');
+const saveBtn    = document.getElementById('onnmt-save');
 
-function sendMessage(msg) {
+function send(msg) {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage(msg, (r) => {
@@ -44,121 +45,111 @@ function sendMessage(msg) {
   });
 }
 
-function renderEngines() {
-  engList.innerHTML = '';
-  order.forEach((name, idx) => {
-    const meta = engines.find((e) => e.name === name) || { name, label: name };
-    const h = health[name] || {};
-    const row = document.createElement('div');
-    row.className = 'engine-item';
-
-    const i = document.createElement('span');
-    i.className = 'idx';
-    i.textContent = String(idx + 1);
-
-    const n = document.createElement('span');
-    n.className = 'name';
-    n.textContent = meta.label;
-    if (h.lastError) n.title = '最近错误：' + h.lastError;
-
-    const st = document.createElement('span');
-    st.className = 'state ' + (h.dead ? 'state-dead' : h.cooling ? 'state-cool' : 'state-ok');
-    st.textContent = h.dead ? '不可达' : h.cooling ? '冷却' : '就绪';
-    st.title = h.lastError ? '最近错误：' + h.lastError : (h.reachable === false ? '网络不可达' : '可用');
-
-    const moves = document.createElement('span');
-    moves.className = 'moves';
-    const up = document.createElement('button');
-    up.textContent = '▲';
-    up.title = '上移（更优先）';
-    up.disabled = idx === 0;
-    up.addEventListener('click', () => moveEngine(idx, -1));
-    const down = document.createElement('button');
-    down.textContent = '▼';
-    down.title = '下移（更靠后）';
-    down.disabled = idx === order.length - 1;
-    down.addEventListener('click', () => moveEngine(idx, 1));
-    moves.appendChild(up);
-    moves.appendChild(down);
-
-    row.appendChild(i);
-    row.appendChild(n);
-    row.appendChild(st);
-    row.appendChild(moves);
-    engList.appendChild(row);
-  });
+function setBadge(cls, text, title) {
+  badge.className = 'badge ' + cls;
+  badge.textContent = text;
+  if (title) badge.title = title;
 }
 
-function moveEngine(idx, delta) {
-  const next = idx + delta;
-  if (next < 0 || next >= order.length) return;
-  const tmp = order[idx];
-  order[idx] = order[next];
-  order[next] = tmp;
-  renderEngines();
-  saveOrder();
-}
+/* 读取当前配置（优先从 background 拿运行时值，回退到 storage） */
+(async function initCfg() {
+  const cfg = await send({ type: 'ghl10n-mt-config' });
+  chrome.storage.local.get(
+    { onmtBase: 'http://127.0.0.1:5000', onmtModelId: 0, onmtUrlRoot: '/translator' },
+    (r) => {
+      baseInput.value  = (cfg && cfg.base) || r.onmtBase || 'http://127.0.0.1:5000';
+      modelInput.value = (cfg && cfg.modelId != null) ? cfg.modelId : (r.onmtModelId || 0);
+      rootInput.value  = (cfg && cfg.urlRoot) || r.onmtUrlRoot || '/translator';
+    }
+  );
 
-let saveTimer = null;
-function saveOrder() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    sendMessage({ type: 'ghl10n-mt-set-order', order });
-    tip.textContent = '已保存引擎优先级';
-    setTimeout(() => { tip.textContent = ''; }, 1800);
-  }, 250);
-}
+  if (cfg && cfg.reachable === true) setBadge('s-ok', '已连接', 'OpenNMT 服务可用');
+  else if (cfg && cfg.reachable === false) setBadge('s-bad', '未连接', cfg.lastError || '');
+  else setBadge('s-wait', '未检测', '点「测试连接」检测服务');
 
-document.getElementById('eng-reset').addEventListener('click', () => {
-  order = DEFAULT_ORDER.slice();
-  renderEngines();
-  sendMessage({ type: 'ghl10n-mt-set-order', order: null });
-  tip.textContent = '已恢复默认优先级';
-  setTimeout(() => { tip.textContent = ''; }, 1800);
-});
-
-/* 重新探测各引擎可达性 */
-document.getElementById('eng-probe').addEventListener('click', async (ev) => {
-  const btn = ev.currentTarget;
-  btn.disabled = true;
-  btn.textContent = '检测中…';
-  const res = await sendMessage({ type: 'ghl10n-mt-reprobe' });
-  if (res && res.ok) {
-    health = res.engines || {};
-    renderEngines();
-    const okList = Object.values(health).filter((e) => e.reachable).map((e) => e.label);
-    tip.textContent = okList.length ? '可用：' + okList.join('、') : '未检测到可用引擎';
-  } else {
-    tip.textContent = '检测失败';
-  }
-  setTimeout(() => { tip.textContent = ''; }, 2600);
-  btn.disabled = false;
-  btn.textContent = '重测';
-});
-
-/* 初始化引擎列表 + 健康度 */
-(async function initEngines() {
-  const res = await sendMessage({ type: 'ghl10n-mt-engines' });
-  if (res && res.ok) {
-    engines = res.engines || [];
-    const known = new Set(engines.map((e) => e.name));
-    order = (res.order || DEFAULT_ORDER).filter((n) => known.has(n));
-    for (const n of DEFAULT_ORDER) if (known.has(n) && !order.includes(n)) order.push(n);
-  } else {
-    // 后台未就绪时用内置清单兜底
-    engines = DEFAULT_ORDER.map((n) => ({ name: n, label: n }));
-    order = DEFAULT_ORDER.slice();
-    chrome.storage.local.get({ engineOrder: null }, (r) => {
-      if (Array.isArray(r.engineOrder) && r.engineOrder.length) {
-        const known = new Set(engines.map((e) => e.name));
-        order = r.engineOrder.filter((n) => known.has(n));
-        for (const n of DEFAULT_ORDER) if (known.has(n) && !order.includes(n)) order.push(n);
-        renderEngines();
-      }
-    });
-  }
-
-  const hres = await sendMessage({ type: 'ghl10n-mt-health' });
-  if (hres && hres.ok) health = hres.engines || {};
-  renderEngines();
+  if (cfg && cfg.lastError) msgEl.textContent = cfg.lastError;
 })();
+
+function collect() {
+  return {
+    base: baseInput.value.trim().replace(/\/+$/, '') || 'http://127.0.0.1:5000',
+    modelId: Number(modelInput.value || 0),
+    urlRoot: rootInput.value.trim() || '/translator',
+  };
+}
+
+/* 申请自定义地址的跨域权限（仅当地址不是默认本机时才申请） */
+async function ensureHostPermission(url) {
+  try {
+    const u = new URL(url);
+    const origin = u.origin + '/*';
+    if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(u.origin)) return true;
+    const granted = await chrome.permissions.contains({ origins: [origin] });
+    if (granted) return true;
+    return await chrome.permissions.request({ origins: [origin] });
+  } catch (e) {
+    return false;
+  }
+}
+
+saveBtn.addEventListener('click', async () => {
+  const cfg = collect();
+  saveBtn.disabled = true;
+
+  const ok = await ensureHostPermission(cfg.base);
+  if (!ok) {
+    msgEl.textContent = '未获得该地址的访问权限，跨域请求会被浏览器拦截。已保存配置，但仍需授权。';
+  }
+
+  const r = await send({ type: 'ghl10n-mt-set-config', ...cfg });
+  saveBtn.disabled = false;
+  if (r && r.ok) {
+    setBadge('s-wait', '未检测', '');
+    msgEl.textContent = ok
+      ? '已保存，点「测试连接」验证服务'
+      : '已保存配置（权限未授予）';
+  } else {
+    msgEl.textContent = '保存失败：扩展后台未响应';
+  }
+});
+
+/* 测试连接：先健康检查，再发一条真实短句 */
+testBtn.addEventListener('click', async () => {
+  testBtn.disabled = true;
+  testBtn.textContent = '检测中…';
+  setBadge('s-wait', '检测中', '');
+
+  const cfg = collect();
+  // 检测时用输入框里的值（可能尚未保存）
+  const saved = await send({ type: 'ghl10n-mt-set-config', ...cfg });
+  if (!saved || !saved.ok) {
+    setBadge('s-bad', '后台无响应', '');
+    msgEl.textContent = '扩展后台未响应，尝试刷新扩展';
+    testBtn.disabled = false;
+    testBtn.textContent = '测试连接';
+    return;
+  }
+
+  const health = await send({ type: 'ghl10n-mt-reprobe' });
+  if (!health || !health.ok || !health.reachable) {
+    setBadge('s-bad', '未连接', '');
+    msgEl.textContent = (health && health.lastError) || '无法连接 OpenNMT 服务。请确认已启动 onmt_server 且地址正确。';
+    testBtn.disabled = false;
+    testBtn.textContent = '测试连接';
+    return;
+  }
+
+  // 健康检查通过 → 实际翻译一句，验证模型可用
+  msgEl.textContent = '服务在线，正在试译…';
+  const t = await send({ type: 'ghl10n-mt', text: 'Hello world' });
+  if (t && t.ok) {
+    setBadge('s-ok', '已连接', '翻译测试通过');
+    msgEl.textContent = '译文：' + String(t.text).slice(0, 40);
+  } else {
+    setBadge('s-cool', '服务在但翻译失败', '');
+    msgEl.textContent = '健康检查通过，但翻译失败：' + ((t && t.error) || '未知原因')
+      + '（请检查 model id 是否正确、模型是否为英译中）';
+  }
+  testBtn.disabled = false;
+  testBtn.textContent = '测试连接';
+});

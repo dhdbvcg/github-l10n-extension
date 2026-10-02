@@ -2,14 +2,15 @@
   "manifest_version": 3,
   "name": "GitHub 中文化",
   "description": "GitHub 界面汉化（离线词条）+ 人机翻译（关于/自述/许可证/发行版等长文对照）。支持 Copilot/AI 界面与企业版流程。",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://translate.googleapis.com/*",
-    "https://clients5.google.com/*",
-    "https://www.bing.com/*",
-    "https://fanyi.youdao.com/*",
-    "https://api.mymemory.translated.net/*"
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"

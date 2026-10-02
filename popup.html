@@ -5,34 +5,22 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 300px;
+      width: 320px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       padding: 16px;
       background: #f6f8fa;
       color: #24292f;
     }
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 14px;
-    }
+    .header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
     .header img { width: 28px; height: 28px; }
     .header h1 { font-size: 15px; font-weight: 600; }
     .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: #fff;
-      border: 1px solid #d0d7de;
-      border-radius: 8px;
-      padding: 10px 14px;
-      margin-bottom: 8px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: #fff; border: 1px solid #d0d7de; border-radius: 8px;
+      padding: 10px 14px; margin-bottom: 8px;
     }
     .row label { font-size: 13px; cursor: pointer; user-select: none; }
-    .switch {
-      position: relative; width: 40px; height: 22px; flex-shrink: 0;
-    }
+    .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute; inset: 0; background: #b0b0b0; border-radius: 22px;
@@ -40,56 +28,49 @@
     }
     .slider::before {
       content: ""; position: absolute; width: 16px; height: 16px;
-      left: 3px; bottom: 3px; background: #fff; border-radius: 50%;
-      transition: .25s;
+      left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .25s;
     }
     .switch input:checked + .slider { background: #2da44e; }
     .switch input:checked + .slider::before { transform: translateX(18px); }
 
-    /* 引擎列表 */
-    .engine-title {
+    .sec-title {
       font-size: 12px; font-weight: 600; color: #57606a;
-      margin: 12px 0 6px; display: flex; justify-content: space-between; align-items: center;
+      margin: 14px 0 6px; display: flex; justify-content: space-between; align-items: center;
     }
-    .engine-title button {
-      font-size: 11px; padding: 2px 8px; border: 1px solid #d0d7de; border-radius: 6px;
-      background: #f6f8fa; color: #57606a; cursor: pointer; font-weight: 400; margin-left: 4px;
+    .card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; }
+    .field { margin-bottom: 10px; }
+    .field:last-child { margin-bottom: 0; }
+    .field label { display: block; font-size: 11px; color: #57606a; margin-bottom: 3px; }
+    .field input {
+      width: 100%; font-size: 12px; padding: 5px 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
+      border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #24292f;
     }
-    .engine-title button:hover { background: #eaeef2; }
-    .engine-list {
-      background: #fff; border: 1px solid #d0d7de; border-radius: 8px; overflow: hidden;
-    }
-    .engine-item {
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; font-size: 12px; border-bottom: 1px solid #eaeef2;
-    }
-    .engine-item:last-child { border-bottom: none; }
-    .engine-item .idx {
-      width: 16px; text-align: center; color: #8b949e; font-size: 11px; flex-shrink: 0;
-    }
-    .engine-item .name { flex: 1; }
-    .engine-item .state { font-size: 10px; padding: 1px 6px; border-radius: 10px; flex-shrink: 0; }
-    .state-ok { background: #dafbe1; color: #1a7f37; }
-    .state-cool { background: #fff8c5; color: #9a6700; }
-    .state-dead { background: #ffebe9; color: #cf222e; }
-    .engine-item .moves { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
-    .engine-item .moves button {
-      width: 18px; height: 13px; line-height: 11px; font-size: 9px; padding: 0;
-      border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 3px;
-      cursor: pointer; color: #57606a;
-    }
-    .engine-item .moves button:hover { background: #eaeef2; }
-    .engine-item .moves button:disabled { opacity: .3; cursor: default; }
-    .tip { font-size: 11px; color: #6e7781; margin-top: 6px; line-height: 1.5; }
+    .field input:focus { outline: 2px solid #0969da; outline-offset: -1px; background: #fff; }
+    .field .hint { font-size: 10px; color: #8b949e; margin-top: 3px; }
 
+    .status-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid #eaeef2;
+    }
+    .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; }
+    .s-ok { background: #dafbe1; color: #1a7f37; }
+    s-wait { background: #ddf4ff; color: #0969da; }
+    .s-cool { background: #fff8c5; color: #9a6700; }
+    .s-bad { background: #ffebe9; color: #cf222e; }
     .btn {
-      font-size: 12px; padding: 3px 10px; border: 1px solid #d0d7de; border-radius: 6px;
+      font-size: 12px; padding: 4px 12px; border: 1px solid #d0d7de; border-radius: 6px;
       background: #f6f8fa; cursor: pointer;
     }
     .btn:hover { background: #eaeef2; }
+    .btn.primary { background: #1f883d; color: #fff; border-color: #1f883d; }
+    .btn.primary:hover { background: #1a7f37; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .msg { font-size: 11px; color: #57606a; margin-top: 8px; line-height: 1.5; word-break: break-all; }
+    .tip { font-size: 11px; color: #6e7781; margin-top: 8px; line-height: 1.55; }
+    .tip code { background: #eaeef2; padding: 1px 4px; border-radius: 3px; font-size: 10px; }
     .footer {
       font-size: 11px; color: #6e7781; text-align: center;
-      margin-top: 6px; padding-top: 8px; border-top: 1px solid #d0d7de;
+      margin-top: 10px; padding-top: 8px; border-top: 1px solid #d0d7de;
     }
   </style>
 </head>
@@ -101,42 +82,59 @@
 
   <div class="row">
     <label for="toggle">启用翻译</label>
-    <label class="switch">
-      <input type="checkbox" id="toggle" checked>
-      <span class="slider"></span>
-    </label>
+    <label class="switch"><input type="checkbox" id="toggle" checked><span class="slider"></span></label>
   </div>
   <div class="row">
     <label for="translate-title">翻译页面标题</label>
-    <label class="switch">
-      <input type="checkbox" id="translate-title" checked>
-      <span class="slider"></span>
-    </label>
+    <label class="switch"><input type="checkbox" id="translate-title" checked><span class="slider"></span></label>
   </div>
   <div class="row">
     <label for="mt-toggle">人机翻译（长文对照）</label>
-    <label class="switch">
-      <input type="checkbox" id="mt-toggle" checked>
-      <span class="slider"></span>
-    </label>
+    <label class="switch"><input type="checkbox" id="mt-toggle" checked><span class="slider"></span></label>
   </div>
 
-  <div class="engine-title">
-    <span>翻译引擎优先级</span>
-    <span>
-      <button id="eng-probe" title="重新检测各引擎网络可达性">重测</button>
-      <button id="eng-reset">默认</button>
-    </span>
-  </div>
-  <div class="engine-list" id="eng-list"></div>
-  <div class="tip">按顺序尝试，失败自动回退。不可达引擎会自动沉底（30 分钟后再试），右上「重测」可立即重新检测。</div>
+  <div class="sec-title">OpenNMT 翻译服务</div>
+  <div class="card">
+    <div class="field">
+      <label for="onnmt-base">服务地址</label>
+      <input id="onnmt-base" type="text" placeholder="http://127.0.0.1:5000" spellcheck="false">
+      <div class="hint">本机部署填 127.0.0.1；局域网/服务器填其 IP</div>
+    </div>
+    <div class="field">
+      <label for="onnmt-model">模型 ID（model id）</label>
+      <input id="onnmt-model" type="number" min="0" step="1" placeholder="0" spellcheck="false">
+      <div class="hint">对应 conf.json 中 models 列表的 id，默认为 0</div>
+    </div>
+    <div class="field">
+      <label for="onnmt-root">URL 前缀</label>
+      <input id="onnmt-root" type="text" placeholder="/translator" spellcheck="false">
+      <div class="hint">OpenNMT-py 默认 /translator</div>
+    </div>
 
-  <div class="row" style="margin-top:10px">
+    <div class="status-row">
+      <span class="badge s-wait" id="onnmt-badge">未检测</span>
+      <span style="display:flex;gap:6px">
+        <button class="btn" id="onnmt-test">测试连接</button>
+        <button class="btn primary" id="onnmt-save">保存</button>
+      </span>
+    </div>
+    <div class="msg" id="onnmt-msg"></div>
+  </div>
+
+  <div class="tip">
+    需自行部署 OpenNMT-py 翻译服务，插件通过其 REST 接口取译文。<br>
+    部署：<code>pip install OpenNMT-py</code> → 准备英译中模型与 <code>conf.json</code> → 启动
+    <code>onmt_server -m conf.json</code><br>
+    详细步骤见仓库 README。
+  </div>
+
+  <div class="sec-title">译文缓存</div>
+  <div class="row">
     <label for="mt-clear" style="color:#cf222e">清除译文缓存</label>
-    <button id="mt-clear" class="btn">清除</button>
+    <button class="btn" id="mt-clear">清除</button>
   </div>
-  <div class="tip" id="mt-clear-tip" style="min-height:14px"></div>
-  <div class="footer">刷新页面后生效 · 词条离线 · 长文点「译」按钮</div>
+  <div class="msg" id="mt-clear-tip" style="min-height:14px"></div>
+  <div class="footer">刷新页面后生效 · 界面词条离线 · 长文点「译」按钮</div>
   <script src="popup.js"></script>
 </body>
 </html>
