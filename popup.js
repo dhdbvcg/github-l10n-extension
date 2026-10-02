@@ -3,18 +3,21 @@
 const toggle     = document.getElementById('toggle');
 const titleCheck = document.getElementById('translate-title');
 const mtToggle   = document.getElementById('mt-toggle');
+const mtAuto     = document.getElementById('mt-auto');
 const clearBtn   = document.getElementById('mt-clear');
 const clearTip   = document.getElementById('mt-clear-tip');
 
-chrome.storage.local.get({ enabled: true, translateTitle: true, mtEnabled: true }, (r) => {
+chrome.storage.local.get({ enabled: true, translateTitle: true, mtEnabled: true, mtAutoButton: true }, (r) => {
   toggle.checked = r.enabled;
   titleCheck.checked = r.translateTitle;
   mtToggle.checked = r.mtEnabled;
+  mtAuto.checked = r.mtAutoButton;
 });
 
 toggle.addEventListener('change', () => chrome.storage.local.set({ enabled: toggle.checked }));
 titleCheck.addEventListener('change', () => chrome.storage.local.set({ translateTitle: titleCheck.checked }));
 mtToggle.addEventListener('change', () => chrome.storage.local.set({ mtEnabled: mtToggle.checked }));
+mtAuto.addEventListener('change', () => chrome.storage.local.set({ mtAutoButton: mtAuto.checked }));
 
 clearBtn.addEventListener('click', () => {
   chrome.storage.local.remove('mtCache', () => {
