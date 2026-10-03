@@ -1,49 +1,51 @@
-/* background.js — MV3 Service Worker：人机翻译中继（OpenNMT-py）
+/* background.js — MV3 Service Worker：人机翻译中继
  *
- * 唯一引擎：OpenNMT-py REST Server（自建，需自行部署）
- *   部署：pip install OpenNMT-py && onmt_server -m conf.json
- *   接口：POST {base}/translator/translate
- *          请求 [{"id": <model_id>, "src": "文本"}]
- *          响应 [[{"src":..., "tgt":"译文", "pred_score":...}]]
- *   健康：GET  {base}/translator/health → {"status":"ok"}
+ * 支持两���本地翻译服务（弹窗可切换，协议自动探测后记住）：
  *
- * 服务地址可在弹窗中修改（storage: onmtBase），默认本机 5000 端口。
- * 词级模型按空格分词，故长文本需分片；分片可并行，结果按索引拼接。
+ *  1) zh_translator（默认，本机 zh_translator 服务）
+ *     健康：GET  {base}/health          → {"ok":true,"loaded":true}
+ *     翻译：POST {base}/translate  {"text":"..."}  → {"translation":"..."}
+ *     说明：CPU 推理较慢，单片不宜过长；不支持数组批量入参。
+ *
+ *  2) OpenNMT-py（onmt_server）
+ *     健康：GET  {base}/translator/health → {"status":"ok"}
+ *     翻译：POST {base}/translator/translate
+ *           请求 [{"id": <model_id>, "src": "文本"}]
+ *           响应 [[{"src":..., "tgt":"译文", "pred_score":...}]]
+ *     词级模型按空格分词，长文本需分片。
  *
  * 其他能力：
- *   - 连通性探测：服务不可达时快速失败并提示，不再白等引擎超时
- *   - 分片并行翻译（限流 3）
+ *   - 协议自动探测：首次翻译时试探 /health 与 /translator/health，记住结果
+ *   - 服务不可达时快速失败（冷却 30s），不再白等超时
+ *   - 分片翻译：CPU 推理慢，故并发 1，避免互相抢资源导致整体超时
  *   - 同文本并发去重（inflight）
  *   - 译文缓存（mt.js 侧，本机 chrome.storage）
  */
 'use strict';
 
-const FETCH_TIMEOUT = 20000;  // 本地服务推理可能较慢
-const PROBE_TIMEOUT = 3000;
-const PARALLEL = 3;           // 分片并行数
-const COOLDOWN_MS = 30000;    // 服务不可用后的冷却
-const DEAD_MS = 60 * 1000;    // 明确连不上后的跳过时长
+const PROBE_TIMEOUT = 4000;
+const FETCH_TIMEOUT = 45000;   // 本地 CPU 推理可能较慢
+const COOLDOWN_MS = 30000;
+const PARALLEL = 1;            // CPU 推理串行更稳，避免相互拖慢
+const CHUNK_MAX = 300;         // 单片上限（CPU 推理，保守取值）
+const MAX_CHUNKS = 40;         // 单次任务最多分多少片，防超大文本拖垮服务
 
-const DEFAULT_BASE = 'http://127.0.0.1:5000';
+const DEFAULT_BASE = 'http://127.0.0.1:8848';
 const DEFAULT_MODEL_ID = 0;
-const DEFAULT_URL_ROOT = '/translator';
-/* 词级模型按空格分词，单片不宜过长；留足余量避免句法碎片 */
-const CHUNK_MAX = 400;
 
-/* 服务配置（由弹窗写入 storage，SW 启动时读取） */
+/* 服务配置（弹窗写入 storage，SW 启动时读取） */
 let CFG = {
   base: DEFAULT_BASE,
   modelId: DEFAULT_MODEL_ID,
-  urlRoot: DEFAULT_URL_ROOT,
-  batch: false,   // 一次请求发多句（服务端支持时更快）
+  proto: 'auto',     // 'auto' | 'zhtr' | 'onnmt'
 };
 
 function loadCfg() {
   try {
-    chrome.storage.local.get({ onmtBase: null, onmtModelId: null, onmtUrlRoot: null }, (r) => {
+    chrome.storage.local.get({ onmtBase: null, onmtModelId: null, onmtProto: null }, (r) => {
       if (r.onmtBase) CFG.base = String(r.onmtBase).replace(/\/+$/, '');
       if (r.onmtModelId != null && !isNaN(Number(r.onmtModelId))) CFG.modelId = Number(r.onmtModelId);
-      if (r.onmtUrlRoot) CFG.urlRoot = String(r.onmtUrlRoot);
+      if (r.onmtProto) CFG.proto = r.onmtProto;
     });
   } catch (e) { /* noop */ }
 }
@@ -51,14 +53,19 @@ loadCfg();
 
 /* =========================== 服务状态 =========================== */
 const state = {
-  reachable: null,   // null=未探测 true/false=已探测
+  proto: null,      // 已探测出的协议：'zhtr' | 'onnmt'
+  ready: null,      // null 未探测
   lastError: '',
   coolUntil: 0,
-  models: null,     // /models 缓存
 };
 
-function url(pathname) {
-  return CFG.base + CFG.urlRoot.replace(/\/+$/, '') + pathname;
+function describe(e) {
+  const msg = String((e && e.message) || e);
+  if (/abort|timeout/i.test(msg)) return '翻译超时（服务推理过慢，可减少单次文本量）';
+  if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(msg)) return '无法连接（服务未启动或地址不对）';
+  if (/ERR_CORS/i.test(msg)) return '被 CORS 拦截（需按 README 配置跨域）';
+  if (/429/.test(msg)) return '服务繁忙（限流），稍后重试';
+  return msg.slice(0, 120);
 }
 
 async function fetchWithTimeout(target, init, ms) {
@@ -74,40 +81,36 @@ async function fetchWithTimeout(target, init, ms) {
   }
 }
 
+/** 探测协议与可用性：先试 zh_translator 的 /health，再试 OpenNMT 的 /translator/health */
 async function probe() {
-  try {
-    const res = await fetchWithTimeout(url('/health'), undefined, PROBE_TIMEOUT);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json().catch(() => ({}));
-    state.reachable = true;
-    state.lastError = '';
-    return { ok: true, data };
-  } catch (e) {
-    state.reachable = false;
-    state.lastError = describe(e);
-    return { ok: false, error: state.lastError };
+  const order = CFG.proto === 'onnmt' ? ['onnmt', 'zhtr']
+    : CFG.proto === 'zhtr' ? ['zhtr', 'onnmt']
+      : ['zhtr', 'onnmt'];
+  let lastErr = '';
+  for (const p of order) {
+    try {
+      const path = p === 'zhtr' ? '/health' : '/translator/health';
+      const res = await fetchWithTimeout(CFG.base + path, undefined, PROBE_TIMEOUT);
+      if (res.ok) {
+        state.proto = p;
+        state.ready = true;
+        state.lastError = '';
+        return { ok: true, proto: p };
+      }
+      lastErr = p + ' HTTP ' + res.status;
+    } catch (e) {
+      lastErr = describe(e);
+    }
   }
+  state.ready = false;
+  state.lastError = '服务未响应（' + lastErr + '）';
+  return { ok: false, error: state.lastError };
 }
 
-/* 把 fetch 异常翻译成人话 */
-function describe(e) {
-  const msg = String((e && e.message) || e);
-  if (/abort|timeout/i.test(msg)) return '连接超时（服务未启动或推理过慢）';
-  if (/Failed to fetch|NetworkError|ERR_CONNECTION/i.test(msg)) return '无法连接（服务未启动或地址不对）';
-  if (/ERR_CORS/i.test(msg)) return '被 CORS 拦截（需按 README 配置跨域）';
-  return msg.slice(0, 100);
-}
-
-/* 拉取模型列表（用于弹窗展示与校验 model_id） */
-async function fetchModels() {
-  try {
-    const res = await fetchWithTimeout(url('/models'), undefined, PROBE_TIMEOUT);
-    if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
-    state.models = await res.json();
-    return { ok: true, models: state.models };
-  } catch (e) {
-    return { ok: false, error: describe(e) };
-  }
+function coolDown(err) {
+  state.ready = false;
+  state.lastError = describe(err);
+  state.coolUntil = Date.now() + COOLDOWN_MS;
 }
 
 /* =========================== 切块 =========================== */
@@ -117,23 +120,19 @@ function splitChunks(text, max) {
   const out = [];
   let cur = '';
   const push = () => { if (cur.trim()) out.push(cur); cur = ''; };
-  // 优先在句子边界切（词级模型对完整句子翻译质量更好）
+  // 优先在句子边界切
   const sentences = src.match(/[^.!?。！？\n]+[.!?。！？]*\n?/g) || [src];
   for (const raw of sentences) {
     const s = raw.trim();
     if (!s) continue;
     if (s.length > max) {
-      // 超长句：按空格分词组块，尽量不切断单词
+      // 超长句：按空格组词，不切断单词
       const words = s.split(/\s+/);
       let piece = '';
       for (const w of words) {
         if ((piece ? piece + ' ' + w : w).length > max) {
           if (piece) { out.push(piece); piece = ''; }
-          if (w.length > max) {
-            // 极端长词（URL 等）：硬切
-            for (let i = 0; i < w.length; i += max) out.push(w.slice(i, i + max));
-            continue;
-          }
+          if (w.length > max) { for (let i = 0; i < w.length; i += max) out.push(w.slice(i, i + max)); continue; }
         }
         piece = piece ? piece + ' ' + w : w;
       }
@@ -154,42 +153,44 @@ function isMostlyChinese(t) {
   return cjk >= 4 && cjk > body.length * 0.5;
 }
 
-/* 单片翻译：POST /translate，请求体 [{id, src}]，取 [0][0].tgt */
+/** 单片翻译：按协议分派 */
 async function trChunk(chunk) {
-  const payload = JSON.stringify([{ id: CFG.modelId, src: chunk }]);
-  const res = await fetchWithTimeout(url('/translate'), {
-    method: 'POST',
-    body: payload,
-  });
-  if (!res.ok) {
-    const e = new Error('HTTP ' + res.status);
-    e.hard = true;
-    throw e;
+  if (state.proto === 'onnmt') {
+    const res = await fetchWithTimeout(CFG.base + '/translator/translate', {
+      method: 'POST',
+      body: JSON.stringify([{ id: CFG.modelId, src: chunk }]),
+    });
+    if (!res.ok) { const e = new Error('OpenNMT HTTP ' + res.status); e.hard = true; throw e; }
+    const data = await res.json();
+    const first = Array.isArray(data) ? data[0] : null;
+    const item = Array.isArray(first) ? first[0] : (first || null);
+    if (item && item.status === 'error') throw new Error(item.error || 'OpenNMT 返回 error');
+    const tgt = item && typeof item.tgt === 'string' ? item.tgt : '';
+    if (!tgt) { const e = new Error('OpenNMT 返回空结果'); e.hard = true; throw e; }
+    return { text: tgt, unchanged: tgt === chunk };
   }
+
+  // zh_translator：POST /translate {"text": "..."}
+  const res = await fetchWithTimeout(CFG.base + '/translate', {
+    method: 'POST',
+    body: JSON.stringify({ text: chunk }),
+  });
+  if (!res.ok) { const e = new Error('HTTP ' + res.status); e.hard = true; throw e; }
   let data;
   try {
     data = await res.json();
   } catch (err) {
-    const e = new Error('响应不是合法 JSON（可能返回了 HTML 错误页）');
-    e.hard = true;
-    throw e;
+    const e = new Error('响应不是合法 JSON'); e.hard = true; throw e;
   }
-  // 契约：[[{ src, tgt, n_best, pred_score }]]
-  const first = Array.isArray(data) ? data[0] : null;
-  const item = Array.isArray(first) ? first[0] : (first || null);
-  if (item && item.status === 'error') throw new Error(item.error || '服务端返回 error');
-  const tgt = item && typeof item.tgt === 'string' ? item.tgt : '';
-  if (!tgt) {
-    const e = new Error('空结果（检查模型 id 与 src_lang 是否匹配）');
-    e.hard = true;
-    throw e;
-  }
+  if (data && data.skipped) return { unchanged: true, text: chunk };
+  const tgt = String((data && data.translation) || '');
+  if (!tgt) { const e = new Error('返回空译文（服务可能未加载模型）'); e.hard = true; throw e; }
   return { text: tgt, unchanged: tgt === chunk };
 }
 
-/* 多片并行：按索引拼接，保证顺序 */
+/** 串行翻译所有分片（CPU 推理，串行更稳） */
 async function trAllChunks(chunks) {
-  const results = new Array(chunks.length);
+  const results = [];
   let unchanged = 0;
   let cursor = 0;
   const workers = Array.from({ length: Math.min(PARALLEL, chunks.length) }, async () => {
@@ -204,48 +205,35 @@ async function trAllChunks(chunks) {
   return { text: results.join(''), unchanged };
 }
 
-function coolDown(err) {
-  state.reachable = false;
-  state.lastError = describe(err);
-  state.coolUntil = Date.now() + COOLDOWN_MS;
-}
-
 async function translateOnce(text) {
   if (isMostlyChinese(text)) return { ok: false, error: '原文已是中文' };
 
-  // 冷却中且未到期：直接失败，不浪费一次探测
-  if (state.reachable === false && state.coolUntil > Date.now()) {
+  if (state.ready === false && state.coolUntil > Date.now()) {
     return { ok: false, error: state.lastError + '（30 秒后重试）' };
   }
-
-  // 首次或冷却到期：先探测
-  if (state.reachable !== true) {
+  if (state.ready !== true || !state.proto) {
     const p = await probe();
-    if (!p.ok) {
-      coolDown(new Error(state.lastError));
-      return { ok: false, error: state.lastError };
-    }
+    if (!p.ok) return { ok: false, error: state.lastError };
   }
 
-  const chunks = splitChunks(text, CHUNK_MAX);
+  const chunks = splitChunks(text, CHUNK_MAX).slice(0, MAX_CHUNKS);
   try {
     const { text: out, unchanged } = await trAllChunks(chunks);
     const trimmed = String(out || '').trim();
-    if (!trimmed) return { ok: false, error: 'OpenNMT 返回空结果' };
-    state.reachable = true;
+    if (!trimmed) return { ok: false, error: '返回空结果' };
+    state.ready = true;
     state.lastError = '';
     return {
       ok: true,
       text: trimmed,
-      engine: 'OpenNMT (' + CFG.base + ')',
+      engine: (state.proto === 'onnmt' ? 'OpenNMT' : '本机翻译服务') + ' @ ' + CFG.base,
       chunks: chunks.length,
       unchangedAll: unchanged === chunks.length,
     };
   } catch (e) {
-    // 连不上（网络层）走冷却；服务端报错只标记本次失败，下次仍可试
     const msg = String((e && e.message) || e);
     if (/Failed to fetch|NetworkError|aborted|timeout|CORS/i.test(msg)) coolDown(e);
-    else state.lastError = msg.slice(0, 100);
+    else state.lastError = msg.slice(0, 120);
     return { ok: false, error: msg };
   }
 }
@@ -255,7 +243,7 @@ const inflight = new Map();
 function translate(text) {
   const src = String(text || '');
   if (inflight.has(src)) return inflight.get(src);
-  const p = translateOnce(src).finally(() => inflight.delete(src));
+  const p = translateOnce(src).finally(() => { inflight.delete(src); });
   inflight.set(src, p);
   return p;
 }
@@ -265,36 +253,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg) return;
 
   if (msg.type === 'ghl10n-mt-config') {
-    sendResponse({
-      ok: true,
-      base: CFG.base,
-      modelId: CFG.modelId,
-      urlRoot: CFG.urlRoot,
-      reachable: state.reachable,
-      lastError: state.lastError,
-    });
+    sendResponse({ ok: true, base: CFG.base, modelId: CFG.modelId, proto: CFG.proto, ready: state.ready, lastError: state.lastError });
     return;
   }
 
   if (msg.type === 'ghl10n-mt-health') {
     sendResponse({
-      ok: true,
-      base: CFG.base,
-      modelId: CFG.modelId,
-      urlRoot: CFG.urlRoot,
-      reachable: state.reachable,
-      cooling: state.coolUntil > Date.now(),
-      lastError: state.lastError,
-      inflight: inflight.size,
+      ok: true, base: CFG.base, modelId: CFG.modelId,
+      proto: state.proto, protoPref: CFG.proto,
+      reachable: state.ready, cooling: state.coolUntil > Date.now(),
+      lastError: state.lastError, inflight: inflight.size,
     });
     return;
   }
 
-  if (msg.type === 'ghl10n-mt-models') {
-    probe().then(async (p) => {
-      if (!p.ok) { sendResponse({ ok: false, error: state.lastError }); return; }
-      const m = await fetchModels();
-      sendResponse(m.ok ? { ok: true, models: m.models } : { ok: false, error: m.error });
+  if (msg.type === 'ghl10n-mt-reprobe') {
+    state.ready = null;
+    state.coolUntil = 0;
+    probe().then(() => {
+      sendResponse({ ok: true, reachable: state.ready, proto: state.proto, lastError: state.lastError, base: CFG.base });
     });
     return true;
   }
@@ -303,26 +280,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const set = {};
     if (msg.base) set.onmtBase = String(msg.base).replace(/\/+$/, '');
     if (msg.modelId != null && !isNaN(Number(msg.modelId))) set.onmtModelId = Number(msg.modelId);
-    if (msg.urlRoot) set.onmtUrlRoot = String(msg.urlRoot);
+    if (msg.proto) set.onmtProto = msg.proto;
     if (Object.keys(set).length) {
       try { chrome.storage.local.set(set); } catch (e) { /* noop */ }
       if (set.onmtBase) CFG.base = set.onmtBase;
       if (set.onmtModelId != null) CFG.modelId = set.onmtModelId;
-      if (set.onmtUrlRoot) CFG.urlRoot = set.onmtUrlRoot;
-      state.reachable = null; // 配置变了，重新探测
+      if (set.onmtProto) CFG.proto = set.onmtProto;
+      state.ready = null;
+      state.proto = null;
       state.coolUntil = 0;
     }
-    sendResponse({ ok: true, base: CFG.base, modelId: CFG.modelId, urlRoot: CFG.urlRoot });
+    sendResponse({ ok: true, base: CFG.base, modelId: CFG.modelId, proto: CFG.proto });
     return;
-  }
-
-  if (msg.type === 'ghl10n-mt-reprobe') {
-    state.reachable = null;
-    state.coolUntil = 0;
-    probe().then(() => {
-      sendResponse({ ok: true, reachable: state.reachable, lastError: state.lastError, base: CFG.base });
-    });
-    return true;
   }
 
   if (msg.type !== 'ghl10n-mt') return;

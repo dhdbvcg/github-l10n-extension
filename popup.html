@@ -97,22 +97,25 @@
     <label class="switch"><input type="checkbox" id="mt-auto" checked><span class="slider"></span></label>
   </div>
 
-  <div class="sec-title">OpenNMT 翻译服务</div>
+  <div class="sec-title">翻译服务</div>
   <div class="card">
     <div class="field">
       <label for="onnmt-base">服务地址</label>
-      <input id="onnmt-base" type="text" placeholder="http://127.0.0.1:5000" spellcheck="false">
-      <div class="hint">本机部署填 127.0.0.1；局域网/服务器填其 IP</div>
+      <input id="onnmt-base" type="text" placeholder="http://127.0.0.1:8848" spellcheck="false">
+      <div class="hint">本机翻译服务 8848；OpenNMT 服务通常为 5000</div>
     </div>
     <div class="field">
-      <label for="onnmt-model">模型 ID（model id）</label>
+      <label for="onnmt-proto">接口协议</label>
+      <select id="onnmt-proto" style="width:100%;font-size:12px;padding:5px 8px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa">
+        <option value="auto">自动探测（推荐）</option>
+        <option value="zhtr">本机翻译服务 /translate</option>
+        <option value="onnmt">OpenNMT-py /translator/translate</option>
+      </select>
+      <div class="hint">自动探测会依次尝试两种接口</div>
+    </div>
+    <div class="field">
+      <label for="onnmt-model">模型 ID（仅 OpenNMT 需要）</label>
       <input id="onnmt-model" type="number" min="0" step="1" placeholder="0" spellcheck="false">
-      <div class="hint">对应 conf.json 中 models 列表的 id，默认为 0</div>
-    </div>
-    <div class="field">
-      <label for="onnmt-root">URL 前缀</label>
-      <input id="onnmt-root" type="text" placeholder="/translator" spellcheck="false">
-      <div class="hint">OpenNMT-py 默认 /translator</div>
     </div>
 
     <div class="status-row">
@@ -126,10 +129,10 @@
   </div>
 
   <div class="tip">
-    需自行部署 OpenNMT-py 翻译服务，插件通过其 REST 接口取译文。<br>
-    部署：<code>pip install OpenNMT-py</code> → 准备英译中模型与 <code>conf.json</code> → 启动
-    <code>onmt_server -m conf.json</code><br>
-    详细步骤见仓库 README。
+    默认连接本机翻译服务（<code>http://127.0.0.1:8848</code>）；也可改用自建的
+    <code>OpenNMT-py</code> 服务，接口协议选「自动探测」即可。<br>
+    OpenNMT 部署：<code>pip install OpenNMT-py</code> → 准备模型与 <code>conf.json</code> →
+    <code>onmt_server -m conf.json</code>，详细步骤见仓库 README。
   </div>
 
   <div class="sec-title">译文缓存</div>

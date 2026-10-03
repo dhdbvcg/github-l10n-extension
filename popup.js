@@ -28,8 +28,8 @@ clearBtn.addEventListener('click', () => {
 
 /* =========================== OpenNMT 服务 =========================== */
 const baseInput  = document.getElementById('onnmt-base');
+const protoSelect= document.getElementById('onnmt-proto');
 const modelInput = document.getElementById('onnmt-model');
-const rootInput  = document.getElementById('onnmt-root');
 const badge      = document.getElementById('onnmt-badge');
 const msgEl      = document.getElementById('onnmt-msg');
 const testBtn    = document.getElementById('onnmt-test');
@@ -58,26 +58,29 @@ function setBadge(cls, text, title) {
 (async function initCfg() {
   const cfg = await send({ type: 'ghl10n-mt-config' });
   chrome.storage.local.get(
-    { onmtBase: 'http://127.0.0.1:5000', onmtModelId: 0, onmtUrlRoot: '/translator' },
+    { onmtBase: 'http://127.0.0.1:8848', onmtModelId: 0, onmtProto: 'auto' },
     (r) => {
-      baseInput.value  = (cfg && cfg.base) || r.onmtBase || 'http://127.0.0.1:5000';
+      baseInput.value  = (cfg && cfg.base) || r.onmtBase || 'http://127.0.0.1:8848';
       modelInput.value = (cfg && cfg.modelId != null) ? cfg.modelId : (r.onmtModelId || 0);
-      rootInput.value  = (cfg && cfg.urlRoot) || r.onmtUrlRoot || '/translator';
+      protoSelect.value = (cfg && cfg.protoPref) || r.onmtProto || 'auto';
     }
   );
 
-  if (cfg && cfg.reachable === true) setBadge('s-ok', '已连接', 'OpenNMT 服务可用');
-  else if (cfg && cfg.reachable === false) setBadge('s-bad', '未连接', cfg.lastError || '');
-  else setBadge('s-wait', '未检测', '点「测试连接」检测服务');
-
+  if (cfg && cfg.reachable === true) {
+    setBadge('s-ok', '已连接', (cfg.proto === 'onnmt' ? 'OpenNMT-py' : '本机翻译服务'));
+  } else if (cfg && cfg.reachable === false) {
+    setBadge('s-bad', '未连接', cfg.lastError || '');
+  } else {
+    setBadge('s-wait', '未检测', '点「测试连接」检测服务');
+  }
   if (cfg && cfg.lastError) msgEl.textContent = cfg.lastError;
 })();
 
 function collect() {
   return {
-    base: baseInput.value.trim().replace(/\/+$/, '') || 'http://127.0.0.1:5000',
+    base: baseInput.value.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8848',
     modelId: Number(modelInput.value || 0),
-    urlRoot: rootInput.value.trim() || '/translator',
+    proto: protoSelect.value,
   };
 }
 
@@ -146,12 +149,12 @@ testBtn.addEventListener('click', async () => {
   msgEl.textContent = '服务在线，正在试译…';
   const t = await send({ type: 'ghl10n-mt', text: 'Hello world' });
   if (t && t.ok) {
-    setBadge('s-ok', '已连接', '翻译测试通过');
+    setBadge('s-ok', '已连接', (t.engine || '').indexOf('OpenNMT') === 0 ? 'OpenNMT-py' : '本机翻译服务');
     msgEl.textContent = '译文：' + String(t.text).slice(0, 40);
   } else {
     setBadge('s-cool', '服务在但翻译失败', '');
     msgEl.textContent = '健康检查通过，但翻译失败：' + ((t && t.error) || '未知原因')
-      + '（请检查 model id 是否正确、模型是否为英译中）';
+      + '（CPU 推理可能较慢，稍后重试或调小单次文本量）';
   }
   testBtn.disabled = false;
   testBtn.textContent = '测试连接';
