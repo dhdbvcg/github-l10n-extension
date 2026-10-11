@@ -27,7 +27,7 @@ const PROBE_TIMEOUT = 5000;
 const FETCH_TIMEOUT = 30000;
 const COOLDOWN_MS = 30000;
 const PARALLEL = 2;
-const CHUNK_MAX = 900;          // 网络翻译无 CPU 瓶颈，可放宽
+const CHUNK_MAX = 420;          // MyMemory 单次上限 500 字符，留足余量避免 QUERY LENGTH LIMIT
 const MAX_CHUNKS = 40;
 
 const DEFAULT_BASE = 'http://127.0.0.1:8848';
@@ -129,6 +129,32 @@ function splitChunks(text, max) {
   }
   push();
   return out.length ? out : [src];
+}
+
+/* =========================== 引擎 0：MyMemory（免密钥，默认首选） ===========================
+ * GET https://api.mymemory.translated.net/get?q=<text>&langpair=en|zh-CN
+ * → {"responseData":{"translatedText":"..."},"responseStatus":200}
+ * 匿名额度有限（约 5000 字符/天）；单次请求上限 500 字符，切块按 450 取值。
+ * 实测：'Hello world' → '你好世界'，约 1 秒。
+ */
+async function trMyMemory(chunk) {
+  const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(chunk) + '&langpair=en|zh-CN';
+  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error('MyMemory HTTP ' + res.status);
+  const data = await res.json();
+  const status = data && data.responseStatus;
+  const txt = String((data && data.responseData && data.responseData.translatedText) || '');
+  if (status != null && Number(status) !== 200) {
+    const detail = String((data && data.responseDetails) || '');
+    if (/QUERY LENGTH LIMIT|MYMEMORY WARNING/i.test(detail + txt)) {
+      throw new Error('MyMemory: ' + (detail || txt).slice(0, 60));
+    }
+    throw new Error('MyMemory 匿名额度可能已用尽（免费约 5000 字符/天）');
+  }
+  if (!txt || /QUERY LENGTH LIMIT|MYMEMORY WARNING/i.test(txt)) {
+    throw new Error('MyMemory 返回空或错误文案');
+  }
+  return { text: txt, unchanged: txt === chunk };
 }
 
 /* =========================== 引擎 1：微软官方 API =========================== */
@@ -256,22 +282,26 @@ async function trLocal(chunk) {
   return { text: tgt, unchanged: tgt === chunk };
 }
 
-const ENGINES = { msapi: trMsApi, bing: trBing, local: trLocal };
+const ENGINES = { mymemory: trMyMemory, msapi: trMsApi, bing: trBing, local: trLocal };
 
 /** 按配置顺序尝试可用引擎 */
 function engineOrder() {
+  if (CFG.provider === 'mymemory') return ['mymemory', 'local'];
   if (CFG.provider === 'bing') return ['bing', 'local'];
   if (CFG.provider === 'msapi') return ['msapi', 'local'];
   if (CFG.provider === 'local') return ['local'];
-  // auto：官方 API（有密钥）→ 网页版 → 本地
+  // auto：微软官方 API（已填密钥）→ MyMemory（免密钥）→ 必应网页 → 本机服务
   const order = [];
   if (CFG.msKey) order.push('msapi');
-  order.push('bing', 'local');
+  order.push('mymemory', 'bing', 'local');
   return order;
 }
 
 function engineLabel(name) {
-  return name === 'msapi' ? '微软官方 API' : name === 'bing' ? '必应网页翻译' : '本地服务';
+  if (name === 'mymemory') return 'MyMemory';
+  if (name === 'msapi') return '微软官方 API';
+  if (name === 'bing') return '必应网页翻译';
+  return '本地服务';
 }
 
 /* =========================== 翻译主流程 =========================== */

@@ -1,4 +1,4 @@
-/* popup.js — 开关 + 翻译来源配置 + 令牌授权 + 缓存管理 */
+/* popup.js — 开关 + 翻译来源配置 + 缓存管理 */
 
 const toggle     = document.getElementById('toggle');
 const titleCheck = document.getElementById('translate-title');
@@ -41,7 +41,6 @@ const badge       = document.getElementById('onnmt-badge');
 const msgEl       = document.getElementById('onnmt-msg');
 const testBtn     = document.getElementById('onnmt-test');
 const saveBtn     = document.getElementById('onnmt-save');
-const captureBtn  = document.getElementById('ms-capture');
 
 function send(msg) {
   return new Promise((resolve) => {
@@ -76,9 +75,9 @@ function setBadge(cls, text, title) {
     }
   );
 
-  if (cfg && cfg.hasToken) setBadge('s-ok', '令牌已捕获', '微软网页翻译令牌有效（约 30 分钟）');
-  else if (cfg && cfg.hasKey) setBadge('s-wait', '已填密钥', '点「测试」验证微软官方 API');
-  else setBadge('s-wait', '待授权', '网页翻译免密钥：先点「授权网页翻译」');
+  if (cfg && cfg.hasKey) setBadge('s-ok', '已配置', '已填微软 API 密钥，将优先使用官方 API');
+  else if (cfg && cfg.hasToken) setBadge('s-ok', '令牌已捕获', '微软网页翻译令牌有效（约 30 分钟）');
+  else setBadge('s-wait', '待测试', '默认使用 MyMemory（免密钥），点「测试」验证');
 })();
 
 function collect() {
@@ -121,21 +120,6 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
-/* 授权网页翻译：打开必应翻译页，用户翻译一句后由 background 捕获令牌 */
-captureBtn.addEventListener('click', async () => {
-  captureBtn.disabled = true;
-  captureBtn.textContent = '打开中…';
-  const r = await send({ type: 'ghl10n-mt-capture' });
-  captureBtn.disabled = false;
-  captureBtn.textContent = '授权网页翻译';
-  if (r && r.ok) {
-    msgEl.textContent = '已打开必应翻译页：在页面上输入任意英文点「翻译」，令牌会被自动捕获（约 30 分钟有效，过期再授权一次）。';
-    setBadge('s-wait', '等待授权', '在打开的页面里翻译一句即可');
-  } else {
-    msgEl.textContent = '无法打开授权页面：' + ((r && r.error) || '请检查扩展权限');
-  }
-});
-
 /* 测试：真实翻译一句 */
 testBtn.addEventListener('click', async () => {
   testBtn.disabled = true;
@@ -159,9 +143,12 @@ testBtn.addEventListener('click', async () => {
     msgEl.textContent = '译文：' + String(t.text).slice(0, 40) + '　（来源：' + (t.engine || '') + '）';
   } else {
     const err = (t && t.error) || '未知原因';
-    if (/令牌/.test(err)) {
+    if (/额度|配额/.test(err)) {
+      setBadge('s-cool', '额度用尽', err);
+      msgEl.textContent = err + '：MyMemory 匿名额度约 5000 字符/天，次日恢复；或改用「微软官方 API」填入密钥。';
+    } else if (/令牌/.test(err)) {
       setBadge('s-wait', '缺令牌', err);
-      msgEl.textContent = err + '：点「授权网页翻译」完成一次授权，或改用「微软官方 API」并填入密钥。';
+      msgEl.textContent = err + '：微软网页翻译需在设置页完成授权，或改用「微软官方 API」并填入密钥。';
     } else if (/本机服务|本地服务|无法连接/.test(err)) {
       setBadge('s-bad', '本机服务未启动', err);
       msgEl.textContent = err;

@@ -147,11 +147,12 @@
       <label for="provider">翻译来源</label>
       <select id="provider">
         <option value="auto">自动（推荐）</option>
-        <option value="bing">微软网页翻译（免密钥，需授权）</option>
+        <option value="mymemory">MyMemory（免密钥，默认）</option>
         <option value="msapi">微软官方 API（需密钥）</option>
+        <option value="bing">微软网页翻译（需授权，易失效）</option>
         <option value="local">本机服务</option>
       </select>
-      <div class="hint">自动顺序：官方 API（已填密钥时）→ 网页翻译 → 本机服务</div>
+      <div class="hint">自动顺序：微软官方 API（已填密钥时）→ MyMemory（免密钥）→ 微软网页 → 本机服务</div>
     </div>
 
     <div class="field">
@@ -177,13 +178,17 @@
     <div class="actions" style="margin-top:16px">
       <button class="btn primary" id="save">保存设置</button>
       <button class="btn" id="test">测试翻译</button>
-      <button class="btn" id="capture">授权网页翻译</button>
       <span class="badge b-wait" id="badge">未检测</span>
     </div>
     <div class="msg" id="msg"></div>
   </div>
 
-  <footer>GitHub 中文化 v1.9.0 · GPL-3.0 · 修改后需在 <code>chrome://extensions/</code> 刷新扩展并刷新 GitHub 页面</footer>
+  <div class="tip">
+    默认使用 <b>MyMemory</b>，免密钥、开箱即用（匿名额度约 5000 字符/天）。<br>
+    若需更大额度，填入 Azure Translator 订阅密钥即走微软官方 API。
+  </div>
+
+  <footer>GitHub 中文化 v1.10.0 · GPL-3.0 · 修改后需在 <code>chrome://extensions/</code> 刷新扩展并刷新 GitHub 页面</footer>
 </div>
 <script src="options.js"></script>
 </body>

@@ -15,7 +15,6 @@ const fBase    = $('base');
 const fModel   = $('modelId');
 const btnSave  = $('save');
 const btnTest  = $('test');
-const btnCap   = $('capture');
 const badge    = $('badge');
 const msg      = $('msg');
 
@@ -107,20 +106,7 @@ btnSave.addEventListener('click', async () => {
   say(r && r.ok ? '设置已保存，刷新 GitHub 页面后生效' : '保存失败：扩展后台未响应', r && r.ok ? 'saved' : '');
 });
 
-btnCap.addEventListener('click', async () => {
-  btnCap.disabled = true;
-  btnCap.textContent = '打开中…';
-  const r = await send({ type: 'ghl10n-mt-capture' });
-  btnCap.disabled = false;
-  btnCap.textContent = '授权网页翻译';
-  if (r && r.ok) {
-    say('已打开必应翻译页：在页面上翻译任意一句英文，插件会自动捕获令牌（约 30 分钟有效）。', 'saved');
-    setBadge('b-wait', '等待授权', '在打开的页面里翻译一句即可');
-  } else {
-    say('无法打开授权页面：' + ((r && r.error) || '请检查扩展权限'), '');
-  }
-});
-
+/* 测试翻译 */
 btnTest.addEventListener('click', async () => {
   btnTest.disabled = true;
   btnTest.textContent = '测试中…';
@@ -134,10 +120,10 @@ btnTest.addEventListener('click', async () => {
     say('译文：' + String(t.text).slice(0, 40) + '　（来源：' + (t.engine || '') + '）', 'saved');
   } else {
     const err = (t && t.error) || '未知原因';
-    if (/令牌/.test(err)) {
-      setBadge('b-wait', '缺令牌', err);
-      say(err + '：点「授权网页翻译」完成一次授权，或改用「微软官方 API」并填入密钥。');
-    } else if (/本机服务|无法连接/.test(err)) {
+    if (/额度|配额/.test(err)) {
+      setBadge('b-cool', '额度用尽', err);
+      say(err + '：MyMemory 匿名额度约 5000 字符/天，次日恢复；或改用「微软官方 API」填入密钥。');
+    } else if (/本机服务|本地服务|无法连接/.test(err)) {
       setBadge('b-bad', '本机服务未启动', err);
       say(err);
     } else {

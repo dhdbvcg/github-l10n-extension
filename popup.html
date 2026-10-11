@@ -107,11 +107,12 @@
       <label for="mt-provider">翻译来源</label>
       <select id="mt-provider">
         <option value="auto">自动（推荐）</option>
-        <option value="bing">微软网页翻译（免密钥）</option>
+        <option value="mymemory">MyMemory（免密钥，默认）</option>
         <option value="msapi">微软官方 API（需密钥）</option>
+        <option value="bing">微软网页翻译（需授权，易失效）</option>
         <option value="local">本机服务</option>
       </select>
-      <div class="hint">自动：官方 API（有密钥时）→ 网页翻译 → 本机服务</div>
+      <div class="hint">自动：官方 API（有密钥时）→ MyMemory → 网页翻译 → 本机服务</div>
     </div>
     <div class="field">
       <label for="ms-key">微软 API 密钥（可选）</label>
@@ -136,7 +137,6 @@
     <div class="status-row">
       <span class="badge s-wait" id="onnmt-badge">未检测</span>
       <span style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn" id="ms-capture" title="打开必应翻译页，在页面上翻译任意一句即自动捕获令牌">授权网页翻译</button>
         <button class="btn" id="onnmt-test">测试</button>
         <button class="btn primary" id="onnmt-save">保存</button>
       </span>
