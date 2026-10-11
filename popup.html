@@ -45,6 +45,10 @@
       width: 100%; font-size: 12px; padding: 5px 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
       border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #24292f;
     }
+    .field select {
+      width: 100%; font-size: 12px; padding: 5px 8px;
+      border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #24292f;
+    }
     .field input:focus { outline: 2px solid #0969da; outline-offset: -1px; background: #fff; }
     .field .hint { font-size: 10px; color: #8b949e; margin-top: 3px; }
 
@@ -100,28 +104,40 @@
   <div class="sec-title">翻译服务</div>
   <div class="card">
     <div class="field">
-      <label for="onnmt-base">服务地址</label>
-      <input id="onnmt-base" type="text" placeholder="http://127.0.0.1:8848" spellcheck="false">
-      <div class="hint">本机翻译服务 8848；OpenNMT 服务通常为 5000</div>
-    </div>
-    <div class="field">
-      <label for="onnmt-proto">接口协议</label>
-      <select id="onnmt-proto" style="width:100%;font-size:12px;padding:5px 8px;border:1px solid #d0d7de;border-radius:6px;background:#f6f8fa">
-        <option value="auto">自动探测（推荐）</option>
-        <option value="zhtr">本机翻译服务 /translate</option>
-        <option value="onnmt">OpenNMT-py /translator/translate</option>
+      <label for="mt-provider">翻译来源</label>
+      <select id="mt-provider">
+        <option value="auto">自动（推荐）</option>
+        <option value="bing">微软网页翻译（免密钥）</option>
+        <option value="msapi">微软官方 API（需密钥）</option>
+        <option value="local">本机服务</option>
       </select>
-      <div class="hint">自动探测会依次尝试两种接口</div>
+      <div class="hint">自动：官方 API（有密钥时）→ 网页翻译 → 本机服务</div>
     </div>
     <div class="field">
-      <label for="onnmt-model">模型 ID（仅 OpenNMT 需要）</label>
+      <label for="ms-key">微软 API 密钥（可选）</label>
+      <input id="ms-key" type="password" placeholder="Azure Translator 订阅密钥" spellcheck="false">
+      <div class="hint">Azure 门户 → Translator 资源 → 密钥与终结点</div>
+    </div>
+    <div class="field">
+      <label for="ms-region">区域（可选）</label>
+      <input id="ms-region" type="text" placeholder="eastasia" spellcheck="false">
+      <div class="hint">如 eastasia / westus；资源为「全局」时留空</div>
+    </div>
+    <div class="field">
+      <label for="onnmt-base">本机服务地址</label>
+      <input id="onnmt-base" type="text" placeholder="http://127.0.0.1:8848" spellcheck="false">
+      <div class="hint">仅「本机服务」或自动兜底时使用</div>
+    </div>
+    <div class="field">
+      <label for="onnmt-model">本地模型 ID（仅 OpenNMT 需要）</label>
       <input id="onnmt-model" type="number" min="0" step="1" placeholder="0" spellcheck="false">
     </div>
 
     <div class="status-row">
       <span class="badge s-wait" id="onnmt-badge">未检测</span>
-      <span style="display:flex;gap:6px">
-        <button class="btn" id="onnmt-test">测试连接</button>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" id="ms-capture" title="打开必应翻译页，在页面上翻译任意一句即自动捕获令牌">授权网页翻译</button>
+        <button class="btn" id="onnmt-test">测试</button>
         <button class="btn primary" id="onnmt-save">保存</button>
       </span>
     </div>
@@ -129,10 +145,8 @@
   </div>
 
   <div class="tip">
-    默认连接本机翻译服务（<code>http://127.0.0.1:8848</code>）；也可改用自建的
-    <code>OpenNMT-py</code> 服务，接口协议选「自动探测」即可。<br>
-    OpenNMT 部署：<code>pip install OpenNMT-py</code> → 准备模型与 <code>conf.json</code> →
-    <code>onmt_server -m conf.json</code>，详细步骤见仓库 README。
+    默认使用<b>微软网页翻译</b>，免密钥：点「授权网页翻译」后在打开的必应页面翻译任意一句，插件自动捕获令牌（约半小时有效，过期再授权一次）。<br>
+    若你有 Azure Translator 订阅，填入密钥即走官方 API，更稳定、无频率限制。
   </div>
 
   <div class="sec-title">译文缓存</div>
