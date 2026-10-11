@@ -153,32 +153,40 @@ async function trMsApi(chunk) {
 }
 
 /* =========================== 引擎 2：必应网页翻译 =========================== */
-/** 取 IG 与令牌：优先已捕获的；否则尝试公开 auth 端点 */
+/** 取 IG 与令牌：webRequest 捕获到的令牌优先；否则尝试公开 auth 端点 */
 async function ensureBingToken() {
   if (bingToken.token && Date.now() - bingToken.at < TOKEN_TTL) return true;
 
-  // (a) 公开 auth 端点
-  try {
-    const res = await fetchWithTimeout(MS_AUTH_URL, { headers: { 'User-Agent': UA } });
-    if (res.ok) {
-      const jwt = (await res.text()).trim();
-      if (jwt && jwt.length > 40 && jwt.split('.').length === 3) {
-        bingToken = { token: jwt, key: String(Date.now()), ig: bingToken.ig || '', at: Date.now() };
+  // 尝试公开 auth 端点（微软已多次变更该路径，失败则回落）
+  const authUrls = [
+    'https://edge.microsoft.com/translate/auth',
+    'https://www.bing.com/ttranslatev3?isVertical=1&IID=translator.5028.1&IG=A1B2C3D4E5F6G7H8&token=&key=',
+  ];
+  for (const au of authUrls) {
+    try {
+      const res = await fetchWithTimeout(au, { headers: { 'User-Agent': UA } }, 6000);
+      if (!res.ok) continue;
+      const body = (await res.text()).trim();
+      // 期望 JWT（含两处 '.'），否则视为无效
+      if (body && body.length > 60 && body.split('.').length === 3) {
+        bingToken = { token: body, key: String(Date.now()), ig: bingToken.ig || '', at: Date.now() };
         try { chrome.storage.local.set({ bingToken }); } catch (e) { /* noop */ }
         return true;
       }
-    }
-  } catch (e) { /* 继续尝试其它方式 */ }
+    } catch (e) { /* 继续下一种方式 */ }
+  }
 
-  // (b) 从 bing.com/translator 页面取 IG（配合已捕获的 token 使用）
-  try {
-    const res = await fetchWithTimeout('https://www.bing.com/translator', { headers: { 'User-Agent': UA } });
-    if (res.ok) {
-      const html = await res.text();
-      const ig = (html.match(/IG:"([^"]+)"/) || [])[1] || '';
-      if (ig) bingToken.ig = ig;
-    }
-  } catch (e) { /* noop */ }
+  // 取 IG（配合 webRequest 捕获到的 token 使用）
+  if (!bingToken.ig) {
+    try {
+      const res = await fetchWithTimeout('https://www.bing.com/translator', { headers: { 'User-Agent': UA } }, 10000);
+      if (res.ok) {
+        const html = await res.text();
+        const ig = (html.match(/IG:"([^"]+)"/) || [])[1] || '';
+        if (ig) bingToken.ig = ig;
+      }
+    } catch (e) { /* noop */ }
+  }
 
   return !!(bingToken.token && bingToken.ig);
 }
@@ -330,26 +338,35 @@ function translate(text) {
 
 /* =========================== 令牌捕获 =========================== */
 /**
- * 通过 declarativeNetRequest 捕获必应翻译请求中的 token/key。
- * 需要 "declarativeNetRequestWithHostAccess" 权限与规则。
+ * 打开必应翻译页供用户手动翻译一次，扩展通过 webRequest
+ * 从该请求的 body 中捕获 token/key（bing.com 需 host 权限，否则读不到请求体）。
  */
-async function setupTokenCapture() {
+async function startCapture() {
+  const origins = ['*://*.bing.com/*'];
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins });
+  } catch (e) {
+    granted = false;
+  }
+  if (!granted) {
+    return { ok: false, error: '未获得 bing.com 访问权限，无法捕获令牌（请在扩展详情中允许该站点）' };
+  }
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: ['ms1'],
       addRules: [{
         id: 'ms1',
         priority: 1,
-        action: { type: 'modifyHeaders', requestHeaders: [
-          // 不做任何修改，仅用于观察；捕获在 webRequest.onBeforeRequestListen 中完成
-        ] },
+        action: { type: 'allowAllRequests' },
         condition: { urlFilter: '*bing.com/ttranslatev3*', resourceTypes: ['xmlhttprequest'] },
       }],
     });
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: describe(e) };
-  }
+  } catch (e) { /* 规则失败不影响 webRequest 监听 */ }
+
+  await chrome.tabs.create({ url: 'https://www.bing.com/translator', active: true });
+  state.lastError = '';
+  return { ok: true, granted: true };
 }
 
 if (chrome.webRequest && chrome.webRequest.onBeforeRequest) {
@@ -359,15 +376,16 @@ if (chrome.webRequest && chrome.webRequest.onBeforeRequest) {
       try {
         const raw = details.requestBody && details.requestBody.raw;
         if (!raw) return;
-        const text = new TextDecoder().decode(raw);
-        const p = new URLSearchParams(text);
+        const p = new URLSearchParams(new TextDecoder().decode(raw));
         const token = p.get('token');
         const key = p.get('key');
         if (token) {
-          bingToken = { token, key: key || String(Date.now()), ig: bingToken.ig || '', at: Date.now() };
+          const ig = (new URL(details.url)).searchParams.get('IG') || bingToken.ig || '';
+          bingToken = { token, key: key || String(Date.now()), ig, at: Date.now() };
           try { chrome.storage.local.set({ bingToken }); } catch (e) { /* noop */ }
           state.lastError = '';
           state.ready = true;
+          state.provider = 'bing';
         }
       } catch (e) { /* noop */ }
     },
@@ -422,11 +440,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   // 打开必应翻译页，让用户手动翻译一次以捕获令牌
   if (msg.type === 'ghl10n-mt-capture') {
-    setupTokenCapture().then(() => {
-      chrome.tabs.create({ url: 'https://www.bing.com/translator', active: true });
-      sendResponse({ ok: true, opened: true });
-    });
-    return;
+    startCapture().then((r) => sendResponse({ ...r, opened: true }));
+    return true;
   }
 
   if (msg.type === 'ghl10n-mt-reprobe') {

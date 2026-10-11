@@ -26,6 +26,11 @@ clearBtn.addEventListener('click', () => {
   });
 });
 
+/* 打开独立设置页 */
+document.getElementById('open-options').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
+
 /* =========================== 翻译来源配置 =========================== */
 const providerSel = document.getElementById('mt-provider');
 const keyInput    = document.getElementById('ms-key');

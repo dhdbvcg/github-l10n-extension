@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GitHub 中文化 · 设置</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+      background: #f6f8fa; color: #1f2328; line-height: 1.6; padding: 32px 16px 64px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    header img { width: 40px; height: 40px; }
+    header h1 { font-size: 20px; font-weight: 600; }
+    header p { font-size: 13px; color: #656d76; margin-top: 2px; }
+
+    .card {
+      background: #fff; border: 1px solid #d1d9e0; border-radius: 8px;
+      padding: 18px 20px; margin-bottom: 18px;
+    }
+    .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .card .desc { font-size: 12px; color: #656d76; margin-bottom: 14px; }
+
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 0; border-top: 1px solid #eaeef2;
+    }
+    .row:first-of-type { border-top: none; }
+    .row .label { font-size: 14px; }
+    .row .hint { font-size: 12px; color: #656d76; margin-top: 2px; max-width: 460px; }
+
+    .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; background: #afb8c1; border-radius: 24px;
+      cursor: pointer; transition: .2s;
+    }
+    .slider::before {
+      content: ""; position: absolute; width: 18px; height: 18px; left: 3px; bottom: 3px;
+      background: #fff; border-radius: 50%; transition: .2s;
+    }
+    .switch input:checked + .slider { background: #1f883d; }
+    .switch input:checked + .slider::before { transform: translateX(20px); }
+
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+    .field input, .field select {
+      width: 100%; font-size: 13px; padding: 7px 10px;
+      border: 1px solid #d1d9e0; border-radius: 6px; background: #f6f8fa; color: #1f2328;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+    }
+    .field input:focus, .field select:focus {
+      outline: 2px solid #0969da; outline-offset: -1px; background: #fff;
+    }
+    .field .hint { font-size: 12px; color: #656d76; margin-top: 4px; }
+
+    .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      font-size: 13px; padding: 7px 16px; border: 1px solid #d1d9e0; border-radius: 6px;
+      background: #f6f8fa; cursor: pointer;
+    }
+    .btn:hover { background: #eaeef2; }
+    .btn.primary { background: #1f883d; border-color: #1f883d; color: #fff; }
+    .btn.primary:hover { background: #1a7f37; }
+    .btn:disabled { opacity: .5; cursor: default; }
+
+    .badge { font-size: 12px; padding: 3px 10px; border-radius: 12px; display: inline-block; }
+    .b-ok { background: #dafbe1; color: #1a7f37; }
+    .b-wait { background: #ddf4ff; color: #0969da; }
+    .b-cool { background: #fff8c5; color: #9a6700; }
+    .b-bad { background: #ffebe9; color: #cf222e; }
+
+    .msg { font-size: 13px; color: #57606a; margin-top: 10px; min-height: 18px; }
+    footer { margin-top: 26px; font-size: 12px; color: #656d76; text-align: center; }
+    .saved { color: #1a7f37; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="icons/icon48.png" alt="logo">
+    <div>
+      <h1>GitHub 中文化 · 设置</h1>
+      <p>界面汉化与人机翻译的全部配置</p>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>界面翻译</h2>
+    <div class="desc">GitHub 界面文字的离线词条翻译（不依赖网络）</div>
+    <div class="row">
+      <div>
+        <div class="label">启用界面汉化</div>
+        <div class="hint">关闭后不再翻译 GitHub 的菜单、按钮等界面文字</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="enabled"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">翻译页面标题</div>
+        <div class="hint">浏览器标签页标题中的界面词条</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="translateTitle"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>人机翻译（长文对照）</h2>
+    <div class="desc">把 README、发行版说明、许可证等长文内容翻译成中文，原文保留可随时切回</div>
+    <div class="row">
+      <div>
+        <div class="label">启用人机翻译</div>
+        <div class="hint">关闭后页面不再出现「译」按钮</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="mtEnabled"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">自动翻译本页</div>
+        <div class="hint">进入页面后自动翻译，无需点击按钮；右下角按钮可手动补翻</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="mtAutoTranslate"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label">显示「自动翻译本页」按钮</div>
+        <div class="hint">右下角常驻按钮，可手动触发全页翻译</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="mtAutoButton"><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <div>
+        <div class="label" style="color:#cf222e">清除译文缓存</div>
+        <div class="hint">清空已缓存的译文，下次翻译会重新请求</div>
+      </div>
+      <button class="btn" id="mtClear">清除缓存</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>翻译来源</h2>
+    <div class="desc">人机翻译使用哪个翻译服务</div>
+
+    <div class="field">
+      <label for="provider">翻译来源</label>
+      <select id="provider">
+        <option value="auto">自动（推荐）</option>
+        <option value="bing">微软网页翻译（免密钥，需授权）</option>
+        <option value="msapi">微软官方 API（需密钥）</option>
+        <option value="local">本机服务</option>
+      </select>
+      <div class="hint">自动顺序：官方 API（已填密钥时）→ 网页翻译 → 本机服务</div>
+    </div>
+
+    <div class="field">
+      <label for="msKey">微软 API 密钥（可选）</label>
+      <input type="password" id="msKey" placeholder="Azure Translator 订阅密钥" spellcheck="false">
+      <div class="hint">Azure 门户 → Translator 资源 →「密钥和终结点」。免费层每月 100 万字符</div>
+    </div>
+    <div class="field">
+      <label for="msRegion">区域（可选）</label>
+      <input type="text" id="msRegion" placeholder="eastasia" spellcheck="false">
+      <div class="hint">如 eastasia / westus；资源为「全球」时留空</div>
+    </div>
+    <div class="field">
+      <label for="base">本机服务地址</label>
+      <input type="text" id="base" placeholder="http://127.0.0.1:8848" spellcheck="false">
+      <div class="hint">zh_translator 默认 8848；OpenNMT-py 默认 5000</div>
+    </div>
+    <div class="field">
+      <label for="modelId">本地模型 ID（仅 OpenNMT 需要）</label>
+      <input type="number" id="modelId" min="0" step="1" placeholder="0">
+    </div>
+
+    <div class="actions" style="margin-top:16px">
+      <button class="btn primary" id="save">保存设置</button>
+      <button class="btn" id="test">测试翻译</button>
+      <button class="btn" id="capture">授权网页翻译</button>
+      <span class="badge b-wait" id="badge">未检测</span>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <footer>GitHub 中文化 v1.9.0 · GPL-3.0 · 修改后需在 <code>chrome://extensions/</code> 刷新扩展并刷新 GitHub 页面</footer>
+</div>
+<script src="options.js"></script>
+</body>
+</html>

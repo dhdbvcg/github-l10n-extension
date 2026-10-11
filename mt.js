@@ -9,7 +9,9 @@
   window.__GH_L10N_MT__ = true;
 
   let enabled = true;
-  let autoBtn = null;          // 「一键翻译本页」按钮是否启用（弹窗可关）
+  let autoBtn = null;          // 是否显示「自动翻译本页」按钮（弹窗可关）
+  let autoMode = false;       // 自动翻译：页面加载后自动翻译，无需点击
+  let autoDone = false;       // 本页是否已自动翻译过
   const cache = new Map(); // hash -> 译文（'' 表示失败/无需翻译）
   let persistTimer = null;
 
@@ -171,7 +173,7 @@
   const BLOB_SEL = '.react-code-lines, table.highlight, .blob-wrapper';
 
   const AREA_TITLE = {
-    all: '一键翻译本页所有可翻译内容',
+    all: '自动翻译本页所有可翻译内容',
     about: '人机翻译：关于简介',
     readme: '人机翻译：自述文件 / 正文内容',
     release: '人机翻译：发行版说明',
@@ -255,18 +257,21 @@
     if (isTreePage() && document.querySelector(FILELIST_SEL) && !document.querySelector('.gh-l10n-mt-float')) {
       const float = makeBtn('filelist');
       float.classList.add('gh-l10n-mt-float');
-      float.textContent = '译 提交信息';
+      float.textContent = '自动翻译 提交信息';
+      float.title = autoMode
+        ? '正在自动翻译；也可手动点击补翻未完成的提交信息'
+        : '翻译文件列表中的提交信息（开启自动翻译后会自动执行）';
       document.body.appendChild(float);
     }
 
-    // 全页一键翻译：右下角常驻
+    // 全页自动翻译：右下角常驻
     if (autoBtn && !document.querySelector('.gh-l10n-mt-auto')) {
       const wrap = document.createElement('div');
       wrap.className = 'gh-l10n-mt-auto-wrap';
       const b = makeBtn('all');
       b.classList.add('gh-l10n-mt-auto');
-      b.textContent = '一键翻译本页';
-      b.title = '自动翻译本页所有可翻译内容';
+      b.textContent = '自动翻译本页';
+      b.title = '翻译本页所有可翻译内容（简介 / README / 发行版 / 议题 / 提交信息）';
       wrap.appendChild(b);
       document.body.appendChild(wrap);
     }
@@ -293,7 +298,7 @@
 
   let autoRunning = false;
 
-  async function translateAllAreas(autoBtn) {
+  async function translateAllAreas(autoBtn, isAuto) {
     if (autoRunning) return;
     const areas = clickableAreas();
     if (!areas.length) {
@@ -328,10 +333,17 @@
     autoRunning = false;
     autoBtn.disabled = false;
     if (totalJobs) {
-      autoBtn.textContent = failed ? '完成 ' + doneJobs + '/' + totalJobs + '，' + failed + ' 失败' : '本页已翻译';
-      autoBtn.title = failed
-        ? '完成，但有 ' + failed + ' 段失败，可在各区域点「重试失败」'
-        : '已翻译 ' + totalJobs + ' 段；点各区域按钮可切回原文';
+      if (isAuto) {
+        // 自动模式：完成后把按钮恢复成「自动翻译本页」，避免长期显示进度
+        autoBtn.title = failed
+          ? '自动翻译完成，但有 ' + failed + ' 段失败，可在各区域点「重试失败」'
+          : '自动翻译完成 ' + totalJobs + ' 段；点各区域按钮可切回原文';
+      } else {
+        autoBtn.textContent = failed ? '完成 ' + doneJobs + '/' + totalJobs + '，' + failed + ' 失败' : '本页已翻译';
+        autoBtn.title = failed
+          ? '完成，但有 ' + failed + ' 段失败，可在各区域点「重试失败」'
+          : '已翻译 ' + totalJobs + ' 段；点各区域按钮可切回原文';
+      }
       setTimeout(resetAutoLabel, 2600);
     } else {
       resetAutoLabel();
@@ -341,8 +353,12 @@
   function resetAutoLabel() {
     const b = document.querySelector('.gh-l10n-mt-auto');
     if (b) {
-      b.textContent = '一键翻译本页';
-      b.title = '自动翻译本页所有可翻译内容（简介 / README / 发行版 / 议题 / 提交信息）';
+      b.textContent = '自动翻译本页';
+      b.title = '翻译本页所有可翻译内容（简介 / README / 发行版 / 议题 / 提交信息）';
+    }
+    const f = document.querySelector('.gh-l10n-mt-float');
+    if (f && f.dataset.state !== 'done') {
+      f.textContent = '自动翻译 提交信息';
     }
   }
 
@@ -624,7 +640,7 @@
       }
     } else {
       // 全部失败：按钮回到可重试状态，并把原因挂到 title 上
-      btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '译 提交信息' : '译';
+      btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '自动翻译 提交信息' : '译';
       btn.title = '翻译失败：' + (lastError || '未知原因') + '（可再次点击重试）';
     }
   }
@@ -704,7 +720,7 @@
       const jobs = collectJobs(area);
       if (!jobs.length) {
         btn.textContent = '无内容';
-        setTimeout(() => { btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '译 提交信息' : '译'; }, 1500);
+        setTimeout(() => { btn.textContent = btn.classList.contains('gh-l10n-mt-float') ? '自动翻译 提交信息' : '译'; }, 1500);
         return;
       }
       await runJobs(btn, jobs);
@@ -776,18 +792,22 @@
   function start() {
     injectCss();
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get({ mtEnabled: true, mtAutoButton: true }, (r) => {
+      chrome.storage.local.get({ mtEnabled: true, mtAutoButton: true, mtAutoTranslate: false }, (r) => {
         enabled = r.mtEnabled !== false;
         autoBtn = r.mtAutoButton !== false;
-        if (enabled) scanAll();
+        autoMode = r.mtAutoTranslate === true;
+        if (enabled) {
+          scanAll();
+          scheduleAutoTranslate();
+        }
       });
       if (chrome.storage.onChanged) {
         chrome.storage.onChanged.addListener((changes, area) => {
           if (area !== 'local') return;
           if ('mtEnabled' in changes) {
             enabled = changes.mtEnabled.newValue !== false;
-            if (enabled) scanAll();
-            else removeAll();
+            if (enabled) { scanAll(); scheduleAutoTranslate(); }
+            else { removeAll(); autoDone = false; }
           }
           if ('mtAutoButton' in changes) {
             autoBtn = changes.mtAutoButton.newValue !== false;
@@ -797,6 +817,10 @@
             } else {
               scanAll();
             }
+          }
+          if ('mtAutoTranslate' in changes) {
+            autoMode = changes.mtAutoTranslate.newValue === true;
+            if (autoMode) { autoDone = false; scheduleAutoTranslate(); }
           }
         });
       }
@@ -811,9 +835,44 @@
         scanAll();
       }, { once: true });
     }
-    document.addEventListener('turbo:load', scanAll);
+    document.addEventListener('turbo:load', () => { scanAll(); scheduleAutoTranslate(true); });
     document.addEventListener('turbo:frame-render', scanAll);
-    window.addEventListener('popstate', scanAll);
+    window.addEventListener('popstate', () => { scanAll(); scheduleAutoTranslate(true); });
+  }
+
+  /**
+   * 自动翻译调度：开启自动翻译时，页面内容就绪后自动翻译本页。
+   * isNav=true 表示 Turbo 导航/SPA 切换，重新计时。
+   */
+  let autoTimer = null;
+  function scheduleAutoTranslate(isNav) {
+    if (!autoMode || !enabled) return;
+    if (isNav) autoDone = false;          // 新页面重新自动翻译
+    if (autoDone) return;
+    clearTimeout(autoTimer);
+    // 延迟等待页面内容（README/提交信息等）渲染完成
+    autoTimer = setTimeout(async () => {
+      if (!autoMode || !enabled || autoDone) return;
+      const areas = clickableAreas();
+      if (!areas.length) { scheduleAutoTranslate(); return; }   // 内容还没渲染，稍后重试
+      autoDone = true;
+      // 优先复用右下角一键按钮承载进度；没有则临时建一个
+      const btn = document.querySelector('.gh-l10n-mt-auto') || makeAutoBtn();
+      await translateAllAreas(btn, /* isAuto */ true);
+    }, 900);
+  }
+
+  /** 构造一个游离的一键翻译按钮（右下角容器不存在时用） */
+  function makeAutoBtn() {
+    const wrap = document.createElement('div');
+    wrap.className = 'gh-l10n-mt-auto-wrap';
+    const b = makeBtn('all');
+    b.classList.add('gh-l10n-mt-auto');
+    b.textContent = '自动翻译中…';
+    b.title = '正在自动翻译本页';
+    wrap.appendChild(b);
+    document.body.appendChild(wrap);
+    return b;
   }
 
   start();
